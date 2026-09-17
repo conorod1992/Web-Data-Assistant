@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 from aiohttp import web
 from homeassistant.core import HomeAssistant
@@ -174,3 +176,27 @@ async def test_client_rejects_oversized_chunked_response(
         await WebDataClient(hass).async_fetch(
             str(server.make_url("/too-large-chunked"))
         )
+
+
+async def test_client_times_out_slow_http_response(
+    hass: HomeAssistant,
+    aiohttp_server,
+    socket_enabled,
+    monkeypatch,
+) -> None:
+    """Convert an actual slow HTTP request into the stable timeout error."""
+    app = web.Application()
+
+    async def slow(_request: web.Request) -> web.Response:
+        await asyncio.sleep(0.05)
+        return web.Response(text="late")
+
+    app.router.add_get("/slow", slow)
+    server = await aiohttp_server(app)
+    monkeypatch.setattr(
+        "custom_components.web_data_assistant.client.DEFAULT_REQUEST_TIMEOUT",
+        0.01,
+    )
+
+    with pytest.raises(WebDataConnectionError, match="The request timed out"):
+        await WebDataClient(hass).async_fetch(str(server.make_url("/slow")))
