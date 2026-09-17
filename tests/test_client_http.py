@@ -264,3 +264,29 @@ async def test_client_sends_post_headers_and_raw_body(
         "body": '{"query":"current"}',
     }
     assert response.json_data == {"accepted": True}
+
+
+async def test_client_falls_back_when_charset_is_unknown(
+    hass: HomeAssistant,
+    aiohttp_server,
+    socket_enabled,
+) -> None:
+    """Decode as UTF-8 when the server advertises an unknown charset."""
+    app = web.Application()
+
+    async def unknown_charset(_request: web.Request) -> web.Response:
+        return web.Response(
+            body='Café'.encode("utf-8"),
+            headers={"Content-Type": "text/plain; charset=x-not-a-real-charset"},
+        )
+
+    app.router.add_get("/unknown-charset", unknown_charset)
+    server = await aiohttp_server(app)
+
+    response = await WebDataClient(hass).async_fetch(
+        str(server.make_url("/unknown-charset"))
+    )
+
+    assert response.status == 200
+    assert response.text == "Café"
+    assert "charset=x-not-a-real-charset" in response.content_type
