@@ -10,6 +10,11 @@ class WebDataAssistantPanel extends HTMLElement {
     this._error = "";
     this._status = "";
 
+    this._sources = [];
+    this._sourcesLoaded = false;
+    this._sourcesError = "";
+    this._refreshingSource = null;
+
     this._form = {
       name: "",
       url: "",
@@ -26,17 +31,20 @@ class WebDataAssistantPanel extends HTMLElement {
     this._jsonMode = "values";
     this._jsonFilter = "";
     this._selectedJson = new Set();
+    this._jsonOverrides = new Map();
 
     this._htmlResult = null;
     this._htmlSearchText = "";
     this._htmlMatches = [];
     this._selectedExtraction = null;
     this._selectedPreviewId = null;
+    this._scrapeUnit = "";
   }
 
   set hass(value) {
     this._hass = value;
     if (!this.shadowRoot.innerHTML) this._render();
+    if (!this._sourcesLoaded) void this._loadSources();
   }
 
   set narrow(value) {
@@ -49,6 +57,7 @@ class WebDataAssistantPanel extends HTMLElement {
 
   connectedCallback() {
     this._render();
+    if (this._hass && !this._sourcesLoaded) void this._loadSources();
   }
 
   _styles() {
@@ -115,12 +124,31 @@ class WebDataAssistantPanel extends HTMLElement {
       .warning { padding:12px 14px; border-radius:8px; background:var(--secondary-background-color); color:var(--secondary-text-color); line-height:1.45; }
       .heading { display:flex; justify-content:space-between; align-items:start; gap:14px; margin-bottom:14px; }
       .heading p { margin:5px 0 0; color:var(--secondary-text-color); font-size:14px; }
+
+      .source-list { display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:12px; }
+      .source-card { border:1px solid var(--divider-color); border-radius:10px; padding:14px; min-width:0; }
+      .source-card-head { display:flex; justify-content:space-between; align-items:start; gap:10px; }
+      .source-title { font-weight:500; overflow-wrap:anywhere; }
+      .source-url { margin-top:6px; color:var(--secondary-text-color); font-size:12px; overflow-wrap:anywhere; }
+      .source-meta { display:flex; flex-wrap:wrap; gap:6px 12px; margin-top:12px; color:var(--secondary-text-color); font-size:12px; }
+      .health { display:inline-flex; align-items:center; gap:6px; white-space:nowrap; font-size:12px; }
+      .health-dot { width:8px; height:8px; border-radius:50%; background:var(--disabled-text-color); }
+      .health.available .health-dot { background:var(--success-color,#43a047); }
+      .health.retained .health-dot { background:var(--warning-color,#ff9800); }
+      .health.unavailable .health-dot { background:var(--error-color,#db4437); }
+
       .json-list { max-height:430px; overflow-y:auto; border:1px solid var(--divider-color); border-radius:10px; }
       .json-row { display:grid; grid-template-columns:32px minmax(0,1fr) minmax(120px,.7fr); gap:10px; align-items:center; padding:11px 12px; border-bottom:1px solid var(--divider-color); cursor:pointer; }
       .json-row:last-child { border-bottom:0; }
       .json-row:hover, .match:hover { background:var(--secondary-background-color); }
       .json-path { font-family:var(--code-font-family,monospace); font-size:13px; overflow-wrap:anywhere; }
       .json-value { color:var(--secondary-text-color); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; text-align:right; }
+      .sensor-review { margin-top:18px; padding-top:16px; border-top:1px solid var(--divider-color); }
+      .sensor-review h3 { margin-bottom:10px; }
+      .sensor-review-row { display:grid; grid-template-columns:minmax(0,1fr) minmax(120px,.35fr); gap:12px; padding:12px 0; border-top:1px solid var(--divider-color); }
+      .sensor-review-row:first-of-type { border-top:0; }
+      .sensor-path { grid-column:1/-1; color:var(--secondary-text-color); font-family:var(--code-font-family,monospace); font-size:12px; overflow-wrap:anywhere; }
+
       .preview-layout { display:grid; grid-template-columns:minmax(0,1.55fr) minmax(290px,.45fr); gap:16px; }
       .frame-wrap { min-height:520px; overflow:hidden; border:1px solid var(--divider-color); border-radius:10px; background:white; }
       iframe { display:block; width:100%; height:620px; border:0; background:white; }
@@ -139,7 +167,7 @@ class WebDataAssistantPanel extends HTMLElement {
         iframe { height:500px; }
       }
       @media(max-width:560px) {
-        .tabs,.search-row { grid-template-columns:1fr; }
+        .tabs,.search-row,.sensor-review-row { grid-template-columns:1fr; }
         .json-row { grid-template-columns:28px minmax(0,1fr); }
         .json-value { grid-column:2; text-align:left; }
       }
@@ -154,8 +182,10 @@ class WebDataAssistantPanel extends HTMLElement {
         <h1>Web Data Assistant</h1>
         <p class="subtitle">Create Home Assistant sensors from websites and JSON APIs without writing selectors, paths, or templates.</p>
 
+        ${this._renderSources()}
+
         <section class="card">
-          <h2>1. Choose a source</h2>
+          <h2>Create a source</h2>
           <div class="tabs">
             ${this._tab("json", "JSON / API", "Load structured data and choose one or more values.")}
             ${this._tab("scrape", "Web page", "Preview a page and identify the visible value you want.")}
@@ -191,6 +221,54 @@ class WebDataAssistantPanel extends HTMLElement {
     if (this._htmlResult) queueMicrotask(() => this._bindFrame());
   }
 
+  _renderSources() {
+    if (!this._sourcesLoaded) {
+      return `<section class="card"><h2>Configured sources</h2><p class="hint">Loading configured sources…</p></section>`;
+    }
+    if (this._sourcesError) {
+      return `<section class="card"><h2>Configured sources</h2><div class="notice error">${this._html(this._sourcesError)}</div></section>`;
+    }
+    if (!this._sources.length) {
+      return `<section class="card"><h2>Configured sources</h2><p class="hint">No Web Data Assistant sources have been created yet.</p></section>`;
+    }
+
+    const cards = this._sources.map((source) => {
+      const health = this._sourceHealth(source);
+      const lastSuccess = source.last_successful_update ? this._formatDate(source.last_successful_update) : "Never";
+      const type = source.source_type === "json" ? "JSON / API" : "Web page";
+      const retaining = source.failure_mode === "keep_last" ? "Keep last value" : "Unavailable on failure";
+      return `
+        <div class="source-card">
+          <div class="source-card-head">
+            <div>
+              <div class="source-title">${this._html(source.title)}</div>
+              <div class="source-url">${this._html(source.url || "")}</div>
+            </div>
+            <span class="health ${health.className}"><span class="health-dot"></span>${this._html(health.label)}</span>
+          </div>
+          <div class="source-meta">
+            <span>${this._html(type)}</span>
+            <span>${Number(source.entity_count || 0)} sensor${Number(source.entity_count || 0) === 1 ? "" : "s"}</span>
+            <span>Every ${Number(source.scan_interval || 5)} min</span>
+            <span>${this._html(retaining)}</span>
+            <span>Last success: ${this._html(lastSuccess)}</span>
+          </div>
+          <div class="actions">
+            <button class="secondary refresh-source" data-entry-id="${this._attr(source.entry_id)}" ${this._refreshingSource === source.entry_id || source.state !== "loaded" ? "disabled" : ""}>${this._refreshingSource === source.entry_id ? "Refreshing…" : "Refresh now"}</button>
+          </div>
+        </div>`;
+    }).join("");
+
+    return `<section class="card"><div class="heading"><div><h2>Configured sources</h2><p>Current source health is shown without exposing request credentials or retrieved values.</p></div></div><div class="source-list">${cards}</div></section>`;
+  }
+
+  _sourceHealth(source) {
+    if (source.state !== "loaded") return { className:"unavailable", label:"Not loaded" };
+    if (source.source_available) return { className:"available", label:"Available" };
+    if (source.failure_mode === "keep_last" && source.last_successful_update) return { className:"retained", label:"Source unavailable · retained" };
+    return { className:"unavailable", label:"Source unavailable" };
+  }
+
   _tab(type, title, subtitle) {
     return `<button class="tab ${this._sourceType === type ? "active" : ""}" data-source="${type}"><strong>${title}</strong><span>${subtitle}</span></button>`;
   }
@@ -207,12 +285,24 @@ class WebDataAssistantPanel extends HTMLElement {
     const all = this._jsonResult.values || [];
     const query = this._jsonFilter.trim().toLowerCase();
     const visible = query ? all.filter((item) => `${item.display_path} ${item.preview}`.toLowerCase().includes(query)) : all;
+    const byPath = new Map(all.map((item) => [item.path,item]));
     const rows = visible.map((item) => `
       <label class="json-row">
         <input class="json-check" type="checkbox" data-path="${this._attr(item.path)}" ${this._selectedJson.has(item.path) ? "checked" : ""}>
         <span class="json-path">${this._html(item.display_path)}</span>
         <span class="json-value" title="${this._attr(item.preview)}">${this._html(item.preview)}</span>
       </label>`).join("");
+
+    const reviewRows = [...this._selectedJson].map((path) => {
+      const item = byPath.get(path);
+      const metadata = this._jsonMetadata(path, item);
+      return `
+        <div class="sensor-review-row">
+          <div class="sensor-path">${this._html(item?.display_path || path || "(root)")}</div>
+          ${this._field("Sensor name", `<input class="json-name" data-path="${this._attr(path)}" type="text" value="${this._attr(metadata.name)}">`)}
+          ${this._field("Unit (optional)", `<input class="json-unit" data-path="${this._attr(path)}" type="text" placeholder="e.g. °C, %, kWh" value="${this._attr(metadata.unit)}">`)}
+        </div>`;
+    }).join("");
 
     return `
       <section class="card">
@@ -227,6 +317,7 @@ class WebDataAssistantPanel extends HTMLElement {
           <input id="json-filter" type="search" placeholder="Filter paths or current values…" value="${this._attr(this._jsonFilter)}" style="margin-bottom:12px;">
           <div class="json-list">${rows || `<div class="hint" style="padding:16px;">No values match this filter.</div>`}</div>
           <p class="hint">${this._selectedJson.size} value${this._selectedJson.size === 1 ? "" : "s"} selected.</p>
+          ${reviewRows ? `<div class="sensor-review"><h3>Review sensors</h3><p class="hint">Friendly names and units can be adjusted without touching the generated JSON paths.</p>${reviewRows}</div>` : ""}
         `}
       </section>`;
   }
@@ -263,6 +354,7 @@ class WebDataAssistantPanel extends HTMLElement {
               <div class="selected">
                 <h3>Selected value</h3>
                 <p>${this._html(selected.text || "(No text)")}</p>
+                ${this._field("Unit (optional)", `<input id="scrape-unit" type="text" placeholder="e.g. °C, %, km/h" value="${this._attr(this._scrapeUnit)}">`)}
                 <details><summary>Advanced extraction details</summary><p class="hint">Selector: <code>${this._html(selected.selector)}</code><br>Match index: ${Number(selected.index || 0)}</p></details>
               </div>` : ""}
           </aside>
@@ -278,7 +370,7 @@ class WebDataAssistantPanel extends HTMLElement {
         <div class="grid">
           ${this._field("Update interval (minutes)", `<input id="interval" type="number" min="1" max="1440" value="${this._attr(this._form.scanInterval)}">`)}
           ${this._field("If the source cannot be reached", `<select id="failure"><option value="unavailable" ${this._form.failureMode === "unavailable" ? "selected" : ""}>Mark sensors unavailable</option><option value="keep_last" ${showStale ? "selected" : ""}>Keep the last known value</option></select>`)}
-          ${showStale ? this._field("Maximum age of retained value (minutes)", `<input id="stale" type="number" min="1" max="525600" placeholder="Leave empty to keep indefinitely" value="${this._attr(this._form.maxStale)}"><span class="hint">Optional. If updates keep failing beyond this age, the retained value becomes unavailable.</span>`, true) : ""}
+          ${showStale ? this._field("Maximum age of retained value (minutes)", `<input id="stale" type="number" min="1" max="525600" placeholder="Leave empty to keep indefinitely" value="${this._attr(this._form.maxStale)}"><span class="hint">Optional. If updates keep failing beyond this age, the retained value becomes unavailable, including across Home Assistant restarts.</span>`, true) : ""}
         </div>
       </section>`;
   }
@@ -297,11 +389,12 @@ class WebDataAssistantPanel extends HTMLElement {
     const valueBindings = {
       name: ["name", "input"], url: ["url", "input"], method: ["method", "change"],
       headers: ["headers", "input"], payload: ["payload", "input"], scanInterval: ["interval", "input"],
-      maxStale: ["stale", "input"], htmlSearchText: ["html-search", "input"],
+      maxStale: ["stale", "input"], htmlSearchText: ["html-search", "input"], scrapeUnit: ["scrape-unit", "input"],
     };
     Object.entries(valueBindings).forEach(([stateKey, [id, eventName]]) => {
       this.shadowRoot.getElementById(id)?.addEventListener(eventName, (event) => {
         if (stateKey === "htmlSearchText") this._htmlSearchText = event.target.value;
+        else if (stateKey === "scrapeUnit") this._scrapeUnit = event.target.value;
         else this._form[stateKey] = event.target.value;
         this._refreshSave();
       });
@@ -325,9 +418,25 @@ class WebDataAssistantPanel extends HTMLElement {
       this._render();
     }));
     this.shadowRoot.querySelectorAll(".json-check").forEach((checkbox) => checkbox.addEventListener("change", (event) => {
-      if (event.target.checked) this._selectedJson.add(event.target.dataset.path);
-      else this._selectedJson.delete(event.target.dataset.path);
+      const path = event.target.dataset.path;
+      if (event.target.checked) {
+        this._selectedJson.add(path);
+        const item = (this._jsonResult?.values || []).find((candidate) => candidate.path === path);
+        this._jsonMetadata(path, item);
+      } else {
+        this._selectedJson.delete(path);
+        this._jsonOverrides.delete(path);
+      }
+      this._render();
+    }));
+    this.shadowRoot.querySelectorAll(".json-name").forEach((input) => input.addEventListener("input", (event) => {
+      const metadata = this._jsonMetadata(event.target.dataset.path);
+      metadata.name = event.target.value;
       this._refreshSave();
+    }));
+    this.shadowRoot.querySelectorAll(".json-unit").forEach((input) => input.addEventListener("input", (event) => {
+      const metadata = this._jsonMetadata(event.target.dataset.path);
+      metadata.unit = event.target.value;
     }));
     this.shadowRoot.getElementById("json-filter")?.addEventListener("input", (event) => {
       this._jsonFilter = event.target.value;
@@ -338,6 +447,7 @@ class WebDataAssistantPanel extends HTMLElement {
       this._selectedPreviewId = null;
       this._render();
     }));
+    this.shadowRoot.querySelectorAll(".refresh-source").forEach((button) => button.addEventListener("click", () => this._refreshSource(button.dataset.entryId)));
 
     this.shadowRoot.getElementById("load")?.addEventListener("click", () => this._load());
     this.shadowRoot.getElementById("find-text")?.addEventListener("click", () => this._findText());
@@ -382,7 +492,7 @@ class WebDataAssistantPanel extends HTMLElement {
     }
     if (target) {
       target.style.boxShadow = "0 0 0 3px #03a9f4 inset";
-      target.scrollIntoView({ block: "center", behavior: "smooth" });
+      target.scrollIntoView({ block:"center", behavior:"smooth" });
     }
   }
 
@@ -393,12 +503,42 @@ class WebDataAssistantPanel extends HTMLElement {
       try { headers = JSON.parse(text); }
       catch (_err) { throw new Error("Headers must be a valid JSON object."); }
       if (!headers || Array.isArray(headers) || typeof headers !== "object") throw new Error("Headers must be a JSON object.");
-      headers = Object.fromEntries(Object.entries(headers).map(([key, value]) => [String(key), String(value)]));
+      headers = Object.fromEntries(Object.entries(headers).map(([key,value]) => [String(key),String(value)]));
     }
     return {
-      url: this._form.url.trim(), method: this._form.method, headers,
-      payload: this._form.payload || undefined, verify_ssl: this._form.verifySsl,
+      url:this._form.url.trim(), method:this._form.method, headers,
+      payload:this._form.payload || undefined, verify_ssl:this._form.verifySsl,
     };
+  }
+
+  async _loadSources() {
+    if (!this._hass) return;
+    try {
+      const result = await this._hass.callWS({ type:"web_data_assistant/list_sources" });
+      this._sources = result.sources || [];
+      this._sourcesError = "";
+    } catch (err) {
+      this._sourcesError = err?.message || "Configured sources could not be loaded.";
+    } finally {
+      this._sourcesLoaded = true;
+      this._render();
+    }
+  }
+
+  async _refreshSource(entryId) {
+    if (!this._hass || !entryId) return;
+    this._refreshingSource = entryId;
+    this._render();
+    try {
+      const updated = await this._hass.callWS({ type:"web_data_assistant/refresh_source", entry_id:entryId });
+      this._sources = this._sources.map((source) => source.entry_id === entryId ? updated : source);
+      this._sourcesError = "";
+    } catch (err) {
+      this._sourcesError = err?.message || "The source could not be refreshed.";
+    } finally {
+      this._refreshingSource = null;
+      this._render();
+    }
   }
 
   async _load() {
@@ -417,7 +557,7 @@ class WebDataAssistantPanel extends HTMLElement {
     try {
       if (this._sourceType === "json") {
         this._jsonResult = await this._hass.callWS({ type:"web_data_assistant/preview_json", ...request });
-        this._htmlResult = null; this._selectedJson.clear();
+        this._htmlResult = null; this._selectedJson.clear(); this._jsonOverrides.clear();
         this._status = `Loaded ${this._jsonResult.values?.length || 0} selectable JSON values.`;
       } else {
         this._htmlResult = await this._hass.callWS({ type:"web_data_assistant/preview_html", ...request });
@@ -460,11 +600,30 @@ class WebDataAssistantPanel extends HTMLElement {
     }
   }
 
+  _jsonMetadata(path, item = null) {
+    if (!this._jsonOverrides.has(path)) {
+      const candidate = item || (this._jsonResult?.values || []).find((entry) => entry.path === path);
+      this._jsonOverrides.set(path, {
+        name:this._friendly(candidate?.display_path || path || "root"),
+        unit:"",
+      });
+    }
+    return this._jsonOverrides.get(path);
+  }
+
   _entities() {
     const sourceName = this._form.name.trim() || "Web data";
     if (this._sourceType === "scrape") {
       if (!this._selectedExtraction) return [];
-      return [{ key:this._slug(sourceName) || "web_value", name:sourceName, selector:this._selectedExtraction.selector, index:Number(this._selectedExtraction.index || 0), value_type:"text" }];
+      const entity = {
+        key:this._slug(sourceName) || "web_value",
+        name:sourceName,
+        selector:this._selectedExtraction.selector,
+        index:Number(this._selectedExtraction.index || 0),
+        value_type:"text",
+      };
+      if (this._scrapeUnit.trim()) entity.unit = this._scrapeUnit.trim();
+      return [entity];
     }
     if (this._jsonMode === "full") return [{ key:"full_response", name:sourceName, path:"", value_type:"json" }];
 
@@ -472,11 +631,19 @@ class WebDataAssistantPanel extends HTMLElement {
     const used = new Set();
     return [...this._selectedJson].map((path) => {
       const item = byPath.get(path);
+      const metadata = this._jsonMetadata(path,item);
       let key = this._slug(path.replaceAll("/","_")) || "root";
       const base = key; let suffix = 2;
       while (used.has(key)) key = `${base}_${suffix++}`;
       used.add(key);
-      return { key, name:this._friendly(item?.display_path || path || "root"), path, value_type:this._valueType(item?.value_type) };
+      const entity = {
+        key,
+        name:metadata.name.trim() || this._friendly(item?.display_path || path || "root"),
+        path,
+        value_type:this._valueType(item?.value_type),
+      };
+      if (metadata.unit.trim()) entity.unit = metadata.unit.trim();
+      return entity;
     });
   }
 
@@ -498,11 +665,13 @@ class WebDataAssistantPanel extends HTMLElement {
       if (Number.isFinite(stale)) message.max_stale_minutes = Math.max(1,Math.min(525600,stale));
     }
 
+    const createdName = this._form.name.trim();
     this._saving = true; this._error = ""; this._status = ""; this._render();
     try {
       await this._hass.callWS(message);
-      this._status = `Created ${this._form.name.trim()} successfully.`;
       this._resetResults();
+      this._status = `Created ${createdName} successfully.`;
+      await this._loadSources();
     } catch (err) {
       this._error = err?.message || "Home Assistant could not create the source.";
     } finally {
@@ -511,8 +680,8 @@ class WebDataAssistantPanel extends HTMLElement {
   }
 
   _resetResults() {
-    this._jsonResult = null; this._selectedJson.clear(); this._jsonFilter = "";
-    this._htmlResult = null; this._htmlMatches = []; this._htmlSearchText = "";
+    this._jsonResult = null; this._selectedJson.clear(); this._jsonOverrides.clear(); this._jsonFilter = "";
+    this._htmlResult = null; this._htmlMatches = []; this._htmlSearchText = ""; this._scrapeUnit = "";
     this._selectedExtraction = null; this._selectedPreviewId = null;
     this._error = ""; this._status = "";
   }
@@ -521,7 +690,9 @@ class WebDataAssistantPanel extends HTMLElement {
     if (!this._form.name.trim() || !this._form.url.trim()) return false;
     if (this._sourceType === "scrape") return Boolean(this._htmlResult && this._selectedExtraction);
     if (!this._jsonResult) return false;
-    return this._jsonMode === "full" || this._selectedJson.size > 0;
+    if (this._jsonMode === "full") return true;
+    if (!this._selectedJson.size) return false;
+    return [...this._selectedJson].every((path) => this._jsonMetadata(path).name.trim());
   }
 
   _refreshSave() {
@@ -539,6 +710,12 @@ class WebDataAssistantPanel extends HTMLElement {
     if (typeName === "bool") return "boolean";
     if (typeName === "int" || typeName === "float") return "number";
     return "text";
+  }
+
+  _formatDate(value) {
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return String(value);
+    return new Intl.DateTimeFormat(undefined,{ dateStyle:"medium", timeStyle:"short" }).format(date);
   }
 
   _slug(value) {
