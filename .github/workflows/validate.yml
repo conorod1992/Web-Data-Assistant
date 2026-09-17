@@ -85,6 +85,7 @@ jobs:
           python -m pytest -q
           tests/test_integration.py
           tests/test_frontend_runtime.py
+          tests/test_source_lifecycle.py
           tests/test_config_flow_runtime.py
           tests/test_scrape_flow_runtime.py
           tests/test_runtime_semantics.py
