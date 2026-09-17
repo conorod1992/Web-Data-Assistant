@@ -88,6 +88,7 @@ jobs:
           tests/test_config_flow_runtime.py
           tests/test_scrape_flow_runtime.py
           tests/test_runtime_semantics.py
+          tests/test_client_http.py
           --maxfail=1
 
   hassfest:
