@@ -141,8 +141,12 @@ async def test_multiple_json_sensors_share_fetch_and_service_device(
     )
     assert temperature_id is not None
     assert humidity_id is not None
-    assert hass.states[temperature_id].state == "14.6"
-    assert hass.states[humidity_id].state == "82"
+    temperature_state = hass.states.get(temperature_id)
+    humidity_state = hass.states.get(humidity_id)
+    assert temperature_state is not None
+    assert humidity_state is not None
+    assert temperature_state.state == "14.6"
+    assert humidity_state.state == "82"
 
     temperature_entry = entity_registry.async_get(temperature_id)
     humidity_entry = entity_registry.async_get(humidity_id)
