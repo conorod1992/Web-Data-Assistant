@@ -30,13 +30,13 @@ from custom_components.web_data_assistant.frontend import PANEL_URL_PATH
 from custom_components.web_data_assistant.models import FetchResponse
 
 
-def _response() -> FetchResponse:
+def _response(value: float = 14.6) -> FetchResponse:
     """Return a valid JSON response for frontend/API smoke tests."""
     return FetchResponse(
         status=200,
         content_type="application/json",
-        text='{"current":{"temperature":14.6}}',
-        json_data={"current": {"temperature": 14.6}},
+        text=f'{{"current":{{"temperature":{value}}}}}',
+        json_data={"current": {"temperature": value}},
     )
 
 
@@ -153,3 +153,68 @@ async def test_panel_create_source_websocket_creates_working_entry(
     assert state is not None
     assert state.state == "14.6"
     assert fetch.await_count >= 2
+
+
+async def test_management_refresh_updates_sensor_and_hides_url_secrets(
+    hass: HomeAssistant,
+    hass_ws_client,
+) -> None:
+    """Refresh a source through the panel API without exposing URL secrets."""
+    secret_url = "https://user:password@example.test/weather.json?token=secret#private"
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Private Weather",
+        data={
+            CONF_SOURCE_NAME: "Private Weather",
+            CONF_SOURCE_TYPE: SOURCE_JSON,
+            CONF_URL: secret_url,
+            CONF_FAILURE_MODE: FAILURE_UNAVAILABLE,
+            CONF_ENTITIES: [
+                {
+                    "key": "temperature",
+                    "name": "Temperature",
+                    CONF_PATH: "/current/temperature",
+                    CONF_VALUE_TYPE: VALUE_NUMBER,
+                }
+            ],
+        },
+    )
+    entry.add_to_hass(hass)
+    fetch = AsyncMock(return_value=_response(14.6))
+
+    with patch(
+        "custom_components.web_data_assistant.client.WebDataClient.async_fetch",
+        new=fetch,
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        client = await hass_ws_client(hass)
+        await client.send_json({"id": 1, "type": f"{DOMAIN}/list_sources"})
+        list_message = await client.receive_json()
+        assert list_message["success"] is True
+        assert list_message["result"]["sources"][0]["url"] == (
+            "https://example.test/weather.json"
+        )
+
+        fetch.return_value = _response(15.2)
+        await client.send_json(
+            {
+                "id": 2,
+                "type": f"{DOMAIN}/refresh_source",
+                "entry_id": entry.entry_id,
+            }
+        )
+        refresh_message = await client.receive_json()
+        assert refresh_message["success"] is True
+        assert refresh_message["result"]["source_available"] is True
+        await hass.async_block_till_done()
+
+    entity_id = er.async_get(hass).async_get_entity_id(
+        "sensor", DOMAIN, f"{entry.entry_id}_temperature"
+    )
+    assert entity_id is not None
+    state = hass.states.get(entity_id)
+    assert state is not None
+    assert state.state == "15.2"
+    assert fetch.await_count == 2
