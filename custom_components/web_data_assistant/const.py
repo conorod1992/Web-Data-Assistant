@@ -52,3 +52,4 @@ MAX_PREVIEW_LENGTH = 180
 
 DATA_FRONTEND_REGISTERED = "frontend_registered"
 DATA_WEBSOCKET_REGISTERED = "websocket_registered"
+DATA_MANAGEMENT_REGISTERED = "management_registered"
