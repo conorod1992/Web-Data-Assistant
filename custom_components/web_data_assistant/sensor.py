@@ -7,7 +7,7 @@ from decimal import Decimal, InvalidOperation
 from typing import Any, override
 
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity, SensorStateClass
-from homeassistant.const import STATE_UNAVAILABLE, STATE_UNKNOWN
+from homeassistant.const import MAX_LENGTH_STATE_STATE, STATE_UNAVAILABLE, STATE_UNKNOWN
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
@@ -63,6 +63,13 @@ def _coerce_value(value: Any, value_type: str) -> Any:
     if isinstance(value, (dict, list)):
         return str(value)
     return value
+
+
+def _bounded_state(value: Any) -> Any:
+    """Keep text states within Home Assistant's 255-character state limit."""
+    if not isinstance(value, str) or len(value) <= MAX_LENGTH_STATE_STATE:
+        return value
+    return f"{value[: MAX_LENGTH_STATE_STATE - 1]}…"
 
 
 async def async_setup_entry(
@@ -163,6 +170,8 @@ class WebDataSensor(
             if "data" not in last_state.attributes:
                 return
             self._restored_value = last_state.attributes["data"]
+        elif "full_value" in last_state.attributes:
+            self._restored_value = last_state.attributes["full_value"]
         else:
             self._restored_value = last_state.state
         self._has_restored_value = True
@@ -178,10 +187,11 @@ class WebDataSensor(
     @property
     def native_value(self) -> Any:
         """Return the latest extracted or restored state."""
-        return _coerce_value(
+        value = _coerce_value(
             self._effective_raw_value(),
             self._config.value_type,
         )
+        return _bounded_state(value)
 
     @property
     def available(self) -> bool:
@@ -217,12 +227,16 @@ class WebDataSensor(
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        """Expose source health and, for full JSON sensors, the payload itself."""
+        """Expose source health and values that do not fit safely in state."""
         attributes: dict[str, Any] = {
             "source_available": self.coordinator.last_update_success,
         }
+        raw_value = self._effective_raw_value()
         if self._config.value_type == VALUE_JSON:
-            attributes["data"] = self._effective_raw_value()
+            attributes["data"] = raw_value
+        elif isinstance(raw_value, str) and len(raw_value) > MAX_LENGTH_STATE_STATE:
+            attributes["full_value"] = raw_value
+            attributes["state_truncated"] = True
 
         last_successful_update = self._effective_last_successful_update()
         if last_successful_update is not None:
