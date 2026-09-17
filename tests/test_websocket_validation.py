@@ -70,11 +70,11 @@ async def test_create_source_rejects_duplicate_entity_keys(
     assert hass.config_entries.async_entries(DOMAIN) == []
 
 
-async def test_create_source_rejects_json_entity_without_path(
+async def test_create_source_rejects_json_entity_without_path_or_attributes(
     hass: HomeAssistant,
     hass_ws_client,
 ) -> None:
-    """Reject a JSON sensor definition that omits its extraction path."""
+    """Reject a JSON sensor that has neither a state path nor attributes."""
     flow = await hass.config_entries.flow.async_init(
         DOMAIN,
         context={"source": SOURCE_USER},
@@ -103,7 +103,8 @@ async def test_create_source_rejects_json_entity_without_path(
 
     assert message["success"] is False
     assert message["error"]["code"] == "invalid_entities"
-    assert "missing its path" in message["error"]["message"]
+    assert "state path" in message["error"]["message"]
+    assert "attributes" in message["error"]["message"]
     assert hass.config_entries.async_entries(DOMAIN) == []
 
 
