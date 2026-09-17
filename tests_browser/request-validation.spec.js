@@ -28,7 +28,7 @@ test("invalid headers JSON is rejected before a preview request is sent", async 
   await shadow.getByLabel("Headers (JSON object)").fill('{"Authorization":');
   await shadow.getByRole("button", { name: "Load source" }).click();
 
-  await expect(shadow.locator(".error")).toContainText("Headers must be valid JSON");
+  await expect(shadow.locator(".error")).toContainText("Headers must be a valid JSON object.");
   const previewCalls = await page.evaluate(() =>
     window.__webDataMessages.filter((message) => message.type === "web_data_assistant/preview_json")
   );
