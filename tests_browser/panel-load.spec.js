@@ -125,7 +125,7 @@ test("one JSON sensor can use one value as state and others as attributes", asyn
   for (const pathText of ["current.temperature", "current.humidity", "current.condition"]) {
     await shadow.locator(".json-row").filter({ hasText: pathText }).locator("input[type=checkbox]").check();
   }
-  await shadow.getByLabel("current.temperature").check();
+  await shadow.getByRole("radio", { name: "current.temperature" }).check();
   const humidity = shadow.locator(".sensor-review-row").filter({ hasText: "current.humidity" });
   const condition = shadow.locator(".sensor-review-row").filter({ hasText: "current.condition" });
   await humidity.getByLabel("Attribute name").fill("humidity");
