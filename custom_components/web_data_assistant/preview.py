@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urljoin, urlsplit, urlunsplit
 
 from bs4 import BeautifulSoup, Tag
-
-from .extraction import _selector_for_tag
 
 _PREVIEW_ID = "data-wda-preview-id"
 _BLOCKED_TAGS = {"script", "iframe", "object", "embed", "form", "base"}
@@ -47,6 +46,38 @@ def _clean_text(tag: Tag) -> str:
     return " ".join(tag.get_text(" ", strip=True).split())[:240]
 
 
+def _safe_identifier(value: Any) -> str | None:
+    """Return a conservative CSS identifier or None."""
+    if not isinstance(value, str) or not value or len(value) > 64:
+        return None
+    if value[0].isdigit():
+        return None
+    if not all(char.isalnum() or char in "_-" for char in value):
+        return None
+    return value
+
+
+def _safe_classes(tag: Tag) -> list[str]:
+    """Return class names safe to use in generated preview selectors."""
+    classes = tag.get("class", [])
+    return [
+        safe
+        for value in classes
+        if (safe := _safe_identifier(value)) is not None
+    ]
+
+
+def _is_preview_candidate(tag: Tag) -> bool:
+    """Return whether a tag will remain visible/selectable in the preview."""
+    if tag.name in _BLOCKED_TAGS or tag.name in {"html", "head", "body", "style"}:
+        return False
+    return not any(
+        isinstance(parent, Tag)
+        and (parent.name in _BLOCKED_TAGS or parent.name == "head")
+        for parent in tag.parents
+    )
+
+
 def _safe_base_url(source_url: str) -> str:
     """Return a resource-resolution base without credentials, query, or fragment."""
     parts = urlsplit(source_url)
@@ -80,6 +111,72 @@ def _ensure_head(soup: BeautifulSoup) -> Tag:
     return head
 
 
+def _annotate_preview_elements(
+    soup: BeautifulSoup,
+) -> dict[str, PreviewElement]:
+    """Annotate selectable elements without repeated whole-document CSS queries.
+
+    Preview generation used to call ``soup.select`` for every element in the
+    document. On a large page that becomes effectively quadratic. Two small
+    counting passes let us generate stable selector/index pairs in linear time.
+    """
+    candidates = [tag for tag in soup.find_all(True) if _is_preview_candidate(tag)]
+
+    id_counts: Counter[str] = Counter()
+    class_counts: Counter[tuple[str, str]] = Counter()
+    tag_counts: Counter[str] = Counter()
+
+    for tag in candidates:
+        if safe_id := _safe_identifier(tag.get("id")):
+            id_counts[safe_id] += 1
+        for class_name in _safe_classes(tag):
+            class_counts[(tag.name, class_name)] += 1
+        tag_counts[tag.name] += 1
+
+    class_seen: Counter[tuple[str, str]] = Counter()
+    tag_seen: Counter[str] = Counter()
+    elements: dict[str, PreviewElement] = {}
+
+    for counter, tag in enumerate(candidates):
+        tag_position = tag_seen[tag.name]
+        tag_seen[tag.name] += 1
+
+        safe_classes = _safe_classes(tag)
+        class_positions: dict[str, int] = {}
+        for class_name in safe_classes:
+            key = (tag.name, class_name)
+            class_positions[class_name] = class_seen[key]
+            class_seen[key] += 1
+
+        safe_id = _safe_identifier(tag.get("id"))
+        if safe_id and id_counts[safe_id] == 1:
+            selector = f"#{safe_id}"
+            index = 0
+        elif safe_classes:
+            # Prefer the rarest single stable class. Its running position gives
+            # the exact index for ``tag.class`` without evaluating the selector.
+            class_name = min(
+                safe_classes,
+                key=lambda value: class_counts[(tag.name, value)],
+            )
+            selector = f"{tag.name}.{class_name}"
+            index = class_positions[class_name]
+        else:
+            selector = tag.name
+            index = tag_position
+
+        preview_id = str(counter)
+        tag[_PREVIEW_ID] = preview_id
+        elements[preview_id] = PreviewElement(
+            selector=selector,
+            index=index,
+            tag=tag.name,
+            text=_clean_text(tag),
+        )
+
+    return elements
+
+
 def build_html_preview(
     html: str,
     source_url: str,
@@ -90,26 +187,8 @@ def build_html_preview(
     srcdoc iframe controlled by the Web Data Assistant frontend.
     """
     soup = BeautifulSoup(html, "html.parser")
-    elements: dict[str, PreviewElement] = {}
     safe_base_url = _safe_base_url(source_url)
-
-    counter = 0
-    for tag in list(soup.find_all(True)):
-        if tag.name in _BLOCKED_TAGS or tag.name in {"html", "head", "body", "style"}:
-            continue
-        try:
-            selector, index = _selector_for_tag(soup, tag)
-        except (ValueError, TypeError):
-            continue
-        preview_id = str(counter)
-        counter += 1
-        tag[_PREVIEW_ID] = preview_id
-        elements[preview_id] = PreviewElement(
-            selector=selector,
-            index=index,
-            tag=tag.name,
-            text=_clean_text(tag),
-        )
+    elements = _annotate_preview_elements(soup)
 
     for tag in list(soup.find_all(_BLOCKED_TAGS)):
         tag.decompose()
