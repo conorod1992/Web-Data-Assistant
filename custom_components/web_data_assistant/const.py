@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import timedelta
-
 DOMAIN = "web_data_assistant"
 PLATFORMS = ["sensor"]
 
@@ -42,7 +40,6 @@ VALUE_NUMBER = "number"
 VALUE_BOOLEAN = "boolean"
 VALUE_JSON = "json"
 
-DEFAULT_SCAN_INTERVAL = timedelta(minutes=5)
 DEFAULT_SCAN_INTERVAL_MINUTES = 5
 DEFAULT_REQUEST_TIMEOUT = 20
 DEFAULT_VERIFY_SSL = True
@@ -53,4 +50,5 @@ MAX_JSON_DISCOVERY_VALUES = 250
 MAX_HTML_MATCHES = 50
 MAX_PREVIEW_LENGTH = 180
 
-DATA_COORDINATORS = "coordinators"
+DATA_FRONTEND_REGISTERED = "frontend_registered"
+DATA_WEBSOCKET_REGISTERED = "websocket_registered"
