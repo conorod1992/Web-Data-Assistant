@@ -25,7 +25,7 @@
           "verify_ssl": "Verify SSL certificate"
         },
         "data_description": {
-          "headers": "Optional JSON object containing request headers, for example {\"Authorization\": \"Bearer …\"}.",
+          "headers": "Optional request headers as a JSON object, such as an Authorization header with a bearer token.",
           "payload": "Optional raw request body. Usually only needed for POST requests.",
           "verify_ssl": "Keep enabled unless you intentionally connect to a source with a self-signed certificate."
         }
