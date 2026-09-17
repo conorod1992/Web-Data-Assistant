@@ -53,12 +53,13 @@ def _coerce_value(value: Any, value_type: str) -> Any:
 
     if value_type == VALUE_BOOLEAN:
         if isinstance(value, bool):
-            return value
+            return "true" if value else "false"
         normalised = str(value).strip().casefold()
         if normalised in {"1", "true", "yes", "on", "open", "active"}:
-            return True
+            return "true"
         if normalised in {"0", "false", "no", "off", "closed", "inactive"}:
-            return False
+            return "false"
+        return normalised
 
     if isinstance(value, (dict, list)):
         return str(value)
