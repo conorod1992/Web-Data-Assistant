@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import pytest
 from aiohttp import web
 from homeassistant.core import HomeAssistant
-import pytest
 
 from custom_components.web_data_assistant.client import (
     WebDataClient,
     WebDataConnectionError,
+    WebDataResponseError,
 )
 
 
@@ -89,3 +90,31 @@ async def test_client_classifies_http_503_as_source_failure(
 
     with pytest.raises(WebDataConnectionError, match="Source returned HTTP 503"):
         await WebDataClient(hass).async_fetch(str(server.make_url("/unavailable")))
+
+
+async def test_client_rejects_malformed_json_response(
+    hass: HomeAssistant,
+    aiohttp_server,
+    socket_enabled,
+) -> None:
+    """Treat invalid JSON from a successful response as a response/data error."""
+    app = web.Application()
+
+    async def malformed(_request: web.Request) -> web.Response:
+        return web.Response(
+            status=200,
+            text='{"temperature": 14.6,',
+            content_type="application/json",
+        )
+
+    app.router.add_get("/malformed", malformed)
+    server = await aiohttp_server(app)
+
+    with pytest.raises(
+        WebDataResponseError,
+        match="responded successfully but did not return valid JSON",
+    ):
+        await WebDataClient(hass).async_fetch(
+            str(server.make_url("/malformed")),
+            parse_json=True,
+        )
