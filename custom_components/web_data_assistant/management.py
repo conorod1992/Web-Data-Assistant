@@ -46,10 +46,13 @@ def _entry_snapshot(entry: ConfigEntry) -> dict[str, Any]:
 
     last_successful_update = None
     source_available = False
+    extraction_error_count = 0
     if coordinator is not None:
         source_available = coordinator.last_update_success
         if coordinator.last_successful_update is not None:
             last_successful_update = coordinator.last_successful_update.isoformat()
+        if coordinator.data is not None:
+            extraction_error_count = len(coordinator.data.extraction_errors)
 
     return {
         "entry_id": entry.entry_id,
@@ -71,6 +74,7 @@ def _entry_snapshot(entry: ConfigEntry) -> dict[str, Any]:
             entry.data.get(CONF_MAX_STALE_MINUTES),
         ),
         "source_available": source_available,
+        "extraction_error_count": extraction_error_count,
         "last_successful_update": last_successful_update,
     }
 
