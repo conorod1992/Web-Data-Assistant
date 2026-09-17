@@ -33,7 +33,7 @@ if (WebDataAssistantPanel && !WebDataAssistantPanel.prototype.__sourceLifecycleI
       const loadingEdit = this._loadingEditableSource === source.entry_id;
       const editing = this._editingEntryId === source.entry_id;
       const confirm = confirmingDelete ? `<div class="delete-confirm"><p><strong>Delete ${this._html(source.title)}?</strong></p><p class="hint">This removes the source and its Home Assistant sensor entities. This cannot be undone.</p><div class="actions"><button class="secondary cancel-delete" data-entry-id="${this._attr(source.entry_id)}" ${deleting ? "disabled" : ""}>Cancel</button><button class="secondary danger confirm-delete" data-entry-id="${this._attr(source.entry_id)}" ${deleting ? "disabled" : ""}>${deleting ? "Deleting…" : "Delete source"}</button></div></div>` : "";
-      return `<div class="source-card"><div class="source-card-head"><div><div class="source-title">${this._html(source.title)}</div><div class="source-url">${this._html(source.url || "")}</div>${editing ? `<div class="editing-note">Editing now</div>` : ""}</div><span class="health ${health.className}"><span class="health-dot"></span>${this._html(health.label)}</span></div><div class="source-meta"><span>${this._html(type)}</span><span>${Number(source.entity_count || 0)} sensor${Number(source.entity_count || 0) === 1 ? "" : "s"}</span><span>Every ${Number(source.scan_interval || 5)} min</span><span>${this._html(retaining)}</span><span>Last success: ${this._html(lastSuccess)}</span>${extractionErrors ? `<span>${extractionErrors} extraction issue${extractionErrors === 1 ? "" : "s"}</span>` : ""}</div><div class="actions"><button class="secondary refresh-source" data-entry-id="${this._attr(source.entry_id)}" ${this._refreshingSource === source.entry_id || source.state !== "loaded" || deleting || loadingEdit ? "disabled" : ""}>${this._refreshingSource === source.entry_id ? "Refreshing…" : "Refresh now"}</button><button class="secondary edit-source" data-entry-id="${this._attr(source.entry_id)}" ${deleting || loadingEdit ? "disabled" : ""}>${loadingEdit ? "Opening…" : editing ? "Editing" : "Edit"}</button><button class="secondary danger request-delete" data-entry-id="${this._attr(source.entry_id)}" ${deleting || loadingEdit ? "disabled" : ""}>Delete</button></div>${confirm}</div>`;
+      return `<div class="source-card"><div class="source-card-head"><div><div class="source-title">${this._html(source.title)}</div><div class="source-url">${this._html(source.url || "")}</div>${editing ? `<div class="editing-note">Editing now</div>` : ""}</div><span class="health ${health.className}"><span class="health-dot"></span>${this._html(health.label)}</span></div><div class="source-meta"><span>${this._html(type)}</span><span>${Number(source.entity_count || 0)} sensor${Number(source.entity_count || 0) === 1 ? "" : "s"}</span><span>Every ${Number(source.scan_interval || 5)} min</span><span>${this._html(retaining)}</span><span>Last success: ${this._html(lastSuccess)}</span>${extractionErrors ? `<span>${extractionErrors} extraction issue${extractionErrors === 1 ? "" : "s"}</span>` : ""}</div><div class="actions"><button class="secondary refresh-source" data-entry-id="${this._attr(source.entry_id)}" ${this._refreshingSource === source.entry_id || source.state !== "loaded" || deleting || loadingEdit ? "disabled" : ""}>${this._refreshingSource === source.entry_id ? "Refreshing…" : "Refresh now"}</button><button class="secondary edit-source" data-entry-id="${this._attr(source.entry_id)}" ${deleting || loadingEdit ? "disabled" : ""}>${loadingEdit ? "Opening…" : editing ? "Editing" : "Edit"}</button><button class="secondary duplicate-source" data-entry-id="${this._attr(source.entry_id)}" ${deleting || loadingEdit ? "disabled" : ""}>Duplicate</button><button class="secondary danger request-delete" data-entry-id="${this._attr(source.entry_id)}" ${deleting || loadingEdit ? "disabled" : ""}>Delete</button></div>${confirm}</div>`;
     }).join("");
 
     const sourceError = this._sourcesError ? `<div class="notice error" style="margin-bottom:12px;">${this._html(this._sourcesError)}</div>` : "";
@@ -41,14 +41,21 @@ if (WebDataAssistantPanel && !WebDataAssistantPanel.prototype.__sourceLifecycleI
   };
 
   WebDataAssistantPanel.prototype._renderSave = function () {
-    if (!this._editingEntryId) return originalRenderSave.call(this);
-    return `<section class="card save-card"><div class="heading" style="margin:0;align-items:center;"><div><h2 style="margin-bottom:4px;">Edit source</h2><p style="margin:0;">Save changes to the existing source. Sensors with unchanged keys keep their Home Assistant identity.</p></div><div class="actions" style="margin-top:0;"><button id="cancel-edit" class="secondary" ${this._saving ? "disabled" : ""}>Cancel edit</button><button id="save" class="primary" ${!this._canSave() || this._saving ? "disabled" : ""}>${this._saving ? "Saving…" : "Save changes"}</button></div></div></section>`;
+    if (this._editingEntryId) {
+      return `<section class="card save-card"><div class="heading" style="margin:0;align-items:center;"><div><h2 style="margin-bottom:4px;">Edit source</h2><p style="margin:0;">Save changes to the existing source. Sensors with unchanged keys keep their Home Assistant identity.</p></div><div class="actions" style="margin-top:0;"><button id="cancel-edit" class="secondary" ${this._saving ? "disabled" : ""}>Cancel edit</button><button id="save" class="primary" ${!this._canSave() || this._saving ? "disabled" : ""}>${this._saving ? "Saving…" : "Save changes"}</button></div></div></section>`;
+    }
+    if (this._duplicateMode) {
+      return `<section class="card save-card"><div class="heading" style="margin:0;align-items:center;"><div><h2 style="margin-bottom:4px;">Duplicate source</h2><p style="margin:0;">Review the copied configuration, choose a new name if needed, then create it as a separate Home Assistant source.</p></div><div class="actions" style="margin-top:0;"><button id="cancel-duplicate" class="secondary" ${this._saving ? "disabled" : ""}>Cancel</button><button id="save" class="primary" ${!this._canSave() || this._saving ? "disabled" : ""}>${this._saving ? "Creating…" : "Create copy"}</button></div></div></section>`;
+    }
+    return originalRenderSave.call(this);
   };
 
   WebDataAssistantPanel.prototype._bind = function () {
     originalBind.call(this);
     this.shadowRoot.querySelectorAll(".edit-source").forEach((button) => button.addEventListener("click", () => this._editSource(button.dataset.entryId)));
-    this.shadowRoot.getElementById("cancel-edit")?.addEventListener("click", () => this._cancelEdit());
+    this.shadowRoot.querySelectorAll(".duplicate-source").forEach((button) => button.addEventListener("click", () => this._duplicateSource(button.dataset.entryId)));
+    this.shadowRoot.getElementById("cancel-edit")?.addEventListener("click", () => this._cancelLifecycleEditor());
+    this.shadowRoot.getElementById("cancel-duplicate")?.addEventListener("click", () => this._cancelLifecycleEditor());
     this.shadowRoot.querySelectorAll(".request-delete").forEach((button) => button.addEventListener("click", () => {
       this._deleteConfirmEntryId = button.dataset.entryId;
       this._sourcesError = "";
@@ -61,14 +68,15 @@ if (WebDataAssistantPanel && !WebDataAssistantPanel.prototype.__sourceLifecycleI
     this.shadowRoot.querySelectorAll(".confirm-delete").forEach((button) => button.addEventListener("click", () => this._deleteSource(button.dataset.entryId)));
   };
 
-  WebDataAssistantPanel.prototype._populateEditableSource = async function (config) {
+  WebDataAssistantPanel.prototype._populateEditableSource = async function (config, mode = "edit") {
     this._resetResults();
-    this._editingEntryId = config.entry_id;
+    this._editingEntryId = mode === "edit" ? config.entry_id : null;
+    this._duplicateMode = mode === "duplicate";
     this._editingOriginalEntities = structuredClone(config.entities || []);
     this._editingPreserveEntitiesOnly = false;
     this._sourceType = config.source_type || "json";
     this._form = {
-      name: String(config.source_name || ""),
+      name: mode === "duplicate" ? `${String(config.source_name || "Web data")} copy` : String(config.source_name || ""),
       url: String(config.url || ""),
       method: String(config.method || "GET"),
       headers: config.headers && Object.keys(config.headers).length ? JSON.stringify(config.headers, null, 2) : "",
@@ -139,25 +147,35 @@ if (WebDataAssistantPanel && !WebDataAssistantPanel.prototype.__sourceLifecycleI
     this._status = "This legacy JSON extraction can keep its existing sensor definition while you edit the request and refresh settings.";
   };
 
-  WebDataAssistantPanel.prototype._editSource = async function (entryId) {
+  WebDataAssistantPanel.prototype._openLifecycleSource = async function (entryId, mode) {
     if (!this._hass || !entryId || this._loadingEditableSource || this._saving) return;
     this._loadingEditableSource = entryId;
     this._sourcesError = "";
     this._render();
     try {
       const config = await this._hass.callWS({ type:"web_data_assistant/get_source", entry_id:entryId });
-      await this._populateEditableSource(config);
+      await this._populateEditableSource(config, mode);
     } catch (err) {
-      this._sourcesError = err?.message || "The source could not be opened for editing.";
+      this._sourcesError = err?.message || `The source could not be opened for ${mode === "duplicate" ? "duplication" : "editing"}.`;
       this._editingEntryId = null;
+      this._duplicateMode = false;
     } finally {
       this._loadingEditableSource = null;
       this._render();
     }
   };
 
-  WebDataAssistantPanel.prototype._cancelEdit = function () {
+  WebDataAssistantPanel.prototype._editSource = function (entryId) {
+    return this._openLifecycleSource(entryId, "edit");
+  };
+
+  WebDataAssistantPanel.prototype._duplicateSource = function (entryId) {
+    return this._openLifecycleSource(entryId, "duplicate");
+  };
+
+  WebDataAssistantPanel.prototype._cancelLifecycleEditor = function () {
     this._editingEntryId = null;
+    this._duplicateMode = false;
     this._editingOriginalEntities = [];
     this._editingPreserveEntitiesOnly = false;
     this._resetLifecycleForm();
@@ -187,7 +205,7 @@ if (WebDataAssistantPanel && !WebDataAssistantPanel.prototype.__sourceLifecycleI
     }
 
     const built = originalEntities.call(this);
-    if (!this._editingEntryId || !this._editingOriginalEntities?.length) return built;
+    if ((!this._editingEntryId && !this._duplicateMode) || !this._editingOriginalEntities?.length) return built;
 
     if (this._sourceType === "scrape") {
       if (built[0] && this._editingOriginalEntities[0]?.key) built[0].key = this._editingOriginalEntities[0].key;
@@ -216,18 +234,11 @@ if (WebDataAssistantPanel && !WebDataAssistantPanel.prototype.__sourceLifecycleI
     return originalCanSave.call(this);
   };
 
-  WebDataAssistantPanel.prototype._save = async function () {
-    if (!this._editingEntryId) return originalSave.call(this);
-    if (!this._hass || !this._canSave()) return;
-
-    let request;
-    try { request = this._request(); }
-    catch (err) { this._error = err.message; this._render(); return; }
-
+  WebDataAssistantPanel.prototype._lifecycleMessage = function (type, entryId = null) {
+    const request = this._request();
     const interval = Number(this._form.scanInterval || 5);
     const message = {
-      type:"web_data_assistant/update_source",
-      entry_id:this._editingEntryId,
+      type,
       source_name:this._form.name.trim(),
       source_type:this._sourceType,
       entities:this._entities(),
@@ -236,12 +247,31 @@ if (WebDataAssistantPanel && !WebDataAssistantPanel.prototype.__sourceLifecycleI
       long_text_policy:this._form.longTextPolicy,
       ...request,
     };
+    if (entryId) message.entry_id = entryId;
     if (this._form.failureMode === "keep_last" && this._form.maxStale.trim()) {
       const stale = Number(this._form.maxStale);
       if (Number.isFinite(stale)) message.max_stale_minutes = Math.max(1, Math.min(525600, stale));
     }
+    return message;
+  };
 
-    const updatedName = this._form.name.trim();
+  WebDataAssistantPanel.prototype._save = async function () {
+    if (!this._editingEntryId && !this._duplicateMode) return originalSave.call(this);
+    if (!this._hass || !this._canSave()) return;
+
+    let message;
+    try {
+      message = this._editingEntryId
+        ? this._lifecycleMessage("web_data_assistant/update_source", this._editingEntryId)
+        : this._lifecycleMessage("web_data_assistant/create_source");
+    } catch (err) {
+      this._error = err.message;
+      this._render();
+      return;
+    }
+
+    const savedName = this._form.name.trim();
+    const wasEdit = Boolean(this._editingEntryId);
     this._saving = true;
     this._error = "";
     this._status = "";
@@ -249,13 +279,14 @@ if (WebDataAssistantPanel && !WebDataAssistantPanel.prototype.__sourceLifecycleI
     try {
       await this._hass.callWS(message);
       this._editingEntryId = null;
+      this._duplicateMode = false;
       this._editingOriginalEntities = [];
       this._editingPreserveEntitiesOnly = false;
       this._resetLifecycleForm();
-      this._status = `Updated ${updatedName} successfully.`;
+      this._status = `${wasEdit ? "Updated" : "Created"} ${savedName} successfully.`;
       await this._loadSources();
     } catch (err) {
-      this._error = err?.message || "Home Assistant could not update the source.";
+      this._error = err?.message || `Home Assistant could not ${wasEdit ? "update" : "create"} the source.`;
     } finally {
       this._saving = false;
       this._render();
