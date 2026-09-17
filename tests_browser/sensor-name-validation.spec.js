@@ -32,7 +32,7 @@ test("selected JSON sensors require a non-empty friendly name before save", asyn
   const shadow = page.locator("web-data-assistant-panel").locator(":scope");
   await shadow.getByLabel("Source name").fill("Weather");
   await shadow.getByLabel("URL").fill("https://example.test/weather.json");
-  await shadow.getByRole("button", { name: "Load source" }).click();
+  await shadow.getByRole("button", { name: "Load JSON" }).click();
   await shadow.locator(".json-row").filter({ hasText: "temperature" }).locator("input[type=checkbox]").check();
 
   const name = shadow.locator(".sensor-review-row").filter({ hasText: "temperature" }).getByLabel("Sensor name");

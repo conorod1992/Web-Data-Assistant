@@ -183,7 +183,7 @@ async def test_source_recovers_cleanly_after_runtime_outage(hass: HomeAssistant)
 
         fetch.side_effect = None
         fetch.return_value = _response(15.2)
-        await entry.runtime_data.async_request_refresh()
+        await entry.runtime_data.async_refresh()
         await hass.async_block_till_done()
 
     recovered = hass.states.get(entity_id)

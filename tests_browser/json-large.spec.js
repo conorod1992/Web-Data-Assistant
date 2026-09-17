@@ -26,6 +26,8 @@ async function mountPanel(page) {
             status: 200,
             content_type: "application/json",
             truncated: true,
+            root_type: "dict",
+            root_fields: [],
             values: candidateValues,
           };
         }
@@ -41,7 +43,7 @@ test("truncated JSON discovery is explicit and remains filterable", async ({ pag
 
   await shadow.getByLabel("Source name").fill("Large API");
   await shadow.getByLabel("URL").fill("https://example.test/large.json");
-  await shadow.getByRole("button", { name: "Load source" }).click();
+  await shadow.getByRole("button", { name: "Load JSON" }).click();
 
   await expect(shadow.getByText("Loaded the source. Showing the first 250 selectable JSON values.")).toBeVisible();
   await expect(shadow.getByText(/more than 250 scalar values/i)).toBeVisible();

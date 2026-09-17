@@ -27,10 +27,10 @@ test("source load failure is shown without losing entered configuration", async 
   const url = shadow.getByLabel("URL");
   await name.fill("Temporary outage");
   await url.fill("https://example.test/unavailable");
-  await shadow.getByRole("button", { name: "Load source" }).click();
+  await shadow.getByRole("button", { name: "Load JSON" }).click();
 
   await expect(shadow.locator(".error")).toContainText("Source returned HTTP 503");
   await expect(name).toHaveValue("Temporary outage");
   await expect(url).toHaveValue("https://example.test/unavailable");
-  await expect(shadow.getByRole("button", { name: "Load source" })).toBeEnabled();
+  await expect(shadow.getByRole("button", { name: "Load JSON" })).toBeEnabled();
 });

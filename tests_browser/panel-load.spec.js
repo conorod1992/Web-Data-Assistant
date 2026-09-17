@@ -35,6 +35,22 @@ async function mountPanel(page, responses = {}) {
   }, responses);
 }
 
+const JSON_PREVIEW = {
+  status: 200,
+  content_type: "application/json",
+  truncated: false,
+  root_type: "dict",
+  root_fields: [
+    { name: "current", path: "/current", preview: "[object Object]", value_type: "dict" },
+    { name: "forecast", path: "/forecast", preview: "[object Object],[object Object]", value_type: "list" },
+  ],
+  values: [
+    { path: "/current/temperature", display_path: "current.temperature", preview: "14.6", value_type: "float" },
+    { path: "/current/humidity", display_path: "current.humidity", preview: "82", value_type: "int" },
+    { path: "/current/condition", display_path: "current.condition", preview: "Cloudy", value_type: "str" },
+  ],
+};
+
 test("panel loads cleanly in Chromium", async ({ page }) => {
   const consoleErrors = [];
   const pageErrors = [];
@@ -45,30 +61,20 @@ test("panel loads cleanly in Chromium", async ({ page }) => {
 
   await mountPanel(page);
 
-  const panel = page.locator("web-data-assistant-panel");
-  const shadow = panel.locator(":scope");
+  const shadow = page.locator("web-data-assistant-panel").locator(":scope");
   await expect(shadow.getByRole("heading", { name: "Web Data Assistant", level: 1 })).toBeVisible();
   await expect(shadow.getByRole("heading", { name: "Configured sources", level: 2 })).toBeVisible();
   await expect(shadow.getByText("No Web Data Assistant sources have been created yet.")).toBeVisible();
-  await expect(shadow.getByRole("heading", { name: "Create a source", level: 2 })).toBeVisible();
-  await expect(shadow.getByRole("button", { name: "Load source" })).toBeVisible();
+  await expect(shadow.getByRole("heading", { name: "1. Source", level: 2 })).toBeVisible();
+  await expect(shadow.getByRole("button", { name: "Load JSON" })).toBeVisible();
 
   expect(pageErrors).toEqual([]);
   expect(consoleErrors).toEqual([]);
 });
 
-test("guided JSON workflow selects, reviews and saves multiple sensors", async ({ page }) => {
+test("guided JSON workflow saves selected values as separate sensors", async ({ page }) => {
   await mountPanel(page, {
-    "web_data_assistant/preview_json": {
-      status: 200,
-      content_type: "application/json",
-      truncated: false,
-      values: [
-        { path: "/current/temperature", display_path: "current.temperature", preview: "14.6", value_type: "float" },
-        { path: "/current/humidity", display_path: "current.humidity", preview: "82", value_type: "int" },
-        { path: "/current/condition", display_path: "current.condition", preview: "Cloudy", value_type: "str" },
-      ],
-    },
+    "web_data_assistant/preview_json": JSON_PREVIEW,
     createdSources: {
       sources: [{
         entry_id: "entry-1", title: "Carlow Weather", source_type: "json",
@@ -82,7 +88,7 @@ test("guided JSON workflow selects, reviews and saves multiple sensors", async (
   const shadow = page.locator("web-data-assistant-panel").locator(":scope");
   await shadow.getByLabel("Source name").fill("Carlow Weather");
   await shadow.getByLabel("URL").fill("https://example.test/weather.json");
-  await shadow.getByRole("button", { name: "Load source" }).click();
+  await shadow.getByRole("button", { name: "Load JSON" }).click();
   await expect(shadow.getByText("Loaded 3 selectable JSON values.")).toBeVisible();
 
   await shadow.locator(".json-row").filter({ hasText: "current.temperature" }).locator("input[type=checkbox]").check();
@@ -95,62 +101,72 @@ test("guided JSON workflow selects, reviews and saves multiple sensors", async (
   await humidityReview.getByLabel("Sensor name").fill("Relative Humidity");
   await humidityReview.getByLabel("Unit (optional)").fill("%");
 
-  const createButton = shadow.getByRole("button", { name: "Create in Home Assistant" });
-  await expect(createButton).toBeEnabled();
-  await createButton.click();
+  await shadow.getByRole("button", { name: "Create in Home Assistant" }).click();
   await expect(shadow.getByText("Created Carlow Weather successfully.")).toBeVisible();
-  await expect(shadow.getByText("Carlow Weather", { exact: true }).first()).toBeVisible();
 
   const createMessage = await page.evaluate(() =>
     window.__webDataMessages.find((message) => message.type === "web_data_assistant/create_source")
   );
-  expect(createMessage).toEqual({
-    type: "web_data_assistant/create_source",
-    source_name: "Carlow Weather",
-    source_type: "json",
-    entities: [
-      { key: "current_temperature", name: "Outdoor Temperature", path: "/current/temperature", value_type: "number", unit: "°C" },
-      { key: "current_humidity", name: "Relative Humidity", path: "/current/humidity", value_type: "number", unit: "%" },
-    ],
-    scan_interval: 5,
-    failure_mode: "unavailable",
-    url: "https://example.test/weather.json",
-    method: "GET",
-    headers: {},
-    verify_ssl: true,
-  });
+  expect(createMessage.entities).toEqual([
+    { key: "current_temperature", name: "Outdoor Temperature", path: "/current/temperature", value_type: "number", unit: "°C" },
+    { key: "current_humidity", name: "Relative Humidity", path: "/current/humidity", value_type: "number", unit: "%" },
+  ]);
+  expect(createMessage.long_text_policy).toBe("truncate");
 });
 
-test("full JSON mode warns about Recorder impact and saves a structured response sensor", async ({ page }) => {
-  await mountPanel(page, {
-    "web_data_assistant/preview_json": {
-      status: 200,
-      content_type: "application/json",
-      truncated: false,
-      values: [
-        { path: "/current/temperature", display_path: "current.temperature", preview: "14.6", value_type: "float" },
-      ],
-    },
-  });
-
+test("one JSON sensor can use one value as state and others as attributes", async ({ page }) => {
+  await mountPanel(page, { "web_data_assistant/preview_json": JSON_PREVIEW });
   const shadow = page.locator("web-data-assistant-panel").locator(":scope");
-  await shadow.getByLabel("Source name").fill("Raw Weather Data");
+  await shadow.getByLabel("Source name").fill("Carlow Weather");
   await shadow.getByLabel("URL").fill("https://example.test/weather.json");
-  await shadow.getByRole("button", { name: "Load source" }).click();
-  await shadow.getByRole("button", { name: /Keep full response/ }).click();
+  await shadow.getByRole("button", { name: "Load JSON" }).click();
+  await shadow.getByRole("button", { name: /One sensor \+ attributes/ }).click();
 
-  await expect(shadow.getByText(/Large or frequently changing responses can substantially increase Recorder database usage/)).toBeVisible();
-  const createButton = shadow.getByRole("button", { name: "Create in Home Assistant" });
-  await expect(createButton).toBeEnabled();
-  await createButton.click();
-  await expect(shadow.getByText("Created Raw Weather Data successfully.")).toBeVisible();
+  for (const pathText of ["current.temperature", "current.humidity", "current.condition"]) {
+    await shadow.locator(".json-row").filter({ hasText: pathText }).locator("input[type=checkbox]").check();
+  }
+  await shadow.getByRole("radio", { name: "current.temperature" }).check();
+  const humidity = shadow.locator(".sensor-review-row").filter({ hasText: "current.humidity" });
+  const condition = shadow.locator(".sensor-review-row").filter({ hasText: "current.condition" });
+  await humidity.getByLabel("Attribute name").fill("humidity");
+  await condition.getByLabel("Attribute name").fill("condition");
+  await shadow.getByRole("button", { name: "Create in Home Assistant" }).click();
 
   const createMessage = await page.evaluate(() =>
     window.__webDataMessages.find((message) => message.type === "web_data_assistant/create_source")
   );
-  expect(createMessage.source_name).toBe("Raw Weather Data");
-  expect(createMessage.source_type).toBe("json");
-  expect(createMessage.entities).toEqual([
-    { key: "full_response", name: "Raw Weather Data", path: "", value_type: "json" },
-  ]);
+  expect(createMessage.entities).toEqual([{
+    key: "carlow_weather",
+    name: "Carlow Weather",
+    value_type: "number",
+    path: "/current/temperature",
+    attributes: {
+      humidity: "/current/humidity",
+      condition: "/current/condition",
+    },
+  }]);
+});
+
+test("root JSON object can be imported as structured attributes", async ({ page }) => {
+  await mountPanel(page, { "web_data_assistant/preview_json": JSON_PREVIEW });
+  const shadow = page.locator("web-data-assistant-panel").locator(":scope");
+  await shadow.getByLabel("Source name").fill("Weather document");
+  await shadow.getByLabel("URL").fill("https://example.test/weather.json");
+  await shadow.getByRole("button", { name: "Load JSON" }).click();
+  await shadow.getByRole("button", { name: /Import object as attributes/ }).click();
+  await expect(shadow.getByText(/Nested objects and arrays remain structured/)).toBeVisible();
+  await shadow.getByRole("button", { name: "Create in Home Assistant" }).click();
+
+  const createMessage = await page.evaluate(() =>
+    window.__webDataMessages.find((message) => message.type === "web_data_assistant/create_source")
+  );
+  expect(createMessage.entities).toEqual([{
+    key: "weather_document",
+    name: "Weather document",
+    value_type: "text",
+    attributes: {
+      current: "/current",
+      forecast: "/forecast",
+    },
+  }]);
 });

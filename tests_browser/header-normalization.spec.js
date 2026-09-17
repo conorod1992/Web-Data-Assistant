@@ -29,7 +29,7 @@ test("advanced request headers normalize scalar values to strings", async ({ pag
   await shadow.getByLabel("URL").fill("https://example.test/data");
   await shadow.getByText("Advanced request settings", { exact: true }).click();
   await shadow.getByLabel("Headers (JSON object)").fill('{"X-Retry":3,"X-Enabled":true,"X-Null":null}');
-  await shadow.getByRole("button", { name: "Load source" }).click();
+  await shadow.getByRole("button", { name: "Load JSON" }).click();
 
   await expect(shadow.getByText("Loaded 0 selectable JSON values.")).toBeVisible();
   const preview = await page.evaluate(() =>

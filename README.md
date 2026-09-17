@@ -1,6 +1,6 @@
 # Web Data Assistant
 
-Web Data Assistant is a Home Assistant custom integration for creating sensors from websites and JSON APIs through a friendly guided interface, without needing to write CSS selectors, JSON paths, or templates.
+Web Data Assistant is a Home Assistant custom integration for creating sensors from websites and JSON APIs through a guided interface, without needing to write CSS selectors, JSON paths, or templates.
 
 > **Development status:** early development. The current code is intended for development/testing rather than production use.
 
@@ -13,32 +13,54 @@ Web Data Assistant starts with the data you want rather than the technical expre
 1. Enter an endpoint URL and optional request settings.
 2. Web Data Assistant fetches the real response through Home Assistant.
 3. Browse and search the scalar values found in the JSON document.
-4. Select one or more values to create as sensors.
-5. Review friendly sensor names and optional units before saving.
-6. The selected values share one HTTP request on each refresh.
+4. Choose how the data should appear in Home Assistant.
+5. Review friendly names, attributes, units and long-text handling before saving.
+6. Everything selected from one source shares one HTTP request on each refresh.
 
-JSON locations are stored internally as RFC 6901 JSON Pointers, so unusual object keys do not require the user to build or escape a template expression.
+The guided panel supports three JSON output modes:
 
-Guided discovery is intentionally capped at 250 scalar values to keep very large responses responsive. The preview API reports when additional values were omitted rather than treating the capped result as complete.
+- **Separate sensors** — each selected scalar value becomes its own Home Assistant sensor and state.
+- **One sensor + attributes** — choose one selected value as the entity state, with the other selected values exposed as normal Home Assistant attributes. The state can also be left as the stable value `Loaded` when the entity is primarily an attribute container.
+- **Import object as attributes** — the top-level keys of a JSON object become attributes on one entity. Nested objects and arrays remain structured dictionaries/lists rather than being flattened into artificial key names.
 
-A source can alternatively keep the complete JSON response in a sensor attribute. This is useful for later templates or automations, but the UI warns that large or frequently changing attributes can increase Recorder database usage.
+JSON locations are stored internally as RFC 6901 JSON Pointers, so unusual object keys do not require the user to build or escape a template expression. Attribute names are editable in the guided aggregate mode.
+
+Guided scalar discovery is intentionally capped at 250 values to keep very large responses responsive. The preview API reports when additional values were omitted rather than treating the capped result as complete.
+
+The older full-document `data` attribute representation remains supported by the backend/fallback flow for compatibility, but the guided panel now favours ordinary Home Assistant attributes for structured JSON data.
 
 ### Web page / scrape sources
 
-1. Enter the page URL and load it through Home Assistant.
-2. Web Data Assistant creates a sanitized, script-free preview of the fetched HTML.
-3. Either click the wanted element directly or enter text/value that is currently visible on the page.
-4. If the text occurs in multiple specific elements, choose the correct match using its surrounding context.
-5. Optionally give the resulting sensor a unit.
+The primary scrape workflow deliberately does **not** try to render the remote page inside Home Assistant.
+
+1. Enter the page URL.
+2. Use **Open page ↗** to view the real website in another browser tab.
+3. Find the value you want and enter its current visible text into Web Data Assistant.
+4. Home Assistant fetches the page in the background and finds the smallest meaningful HTML elements containing that text.
+5. If several matches are found, choose the correct one using the surrounding-text context shown for each result.
 6. Web Data Assistant generates and stores the CSS selector and match index internally.
 
-Text search ignores non-visible document content such as scripts, styles, templates and noscript blocks so the guided search remains aligned with what the user can actually see.
+The text entered during setup is only an identification aid. Runtime extraction uses the generated selector/index, so the value is free to change on later polls.
 
-The generated selector/index are shown only under advanced extraction details. They are validated again against a fresh response before the source is created.
+Text search ignores non-visible document content such as scripts, styles, templates and noscript blocks. Generated selector/index details are available only under advanced extraction details and are validated again against a fresh response before the source is created.
 
-The preview is rendered from server-fetched HTML rather than framing the remote website. Scripts, forms, nested frames, objects and active navigation are removed, and the preview is additionally sandboxed and protected with a restrictive Content Security Policy.
+If text visible in the browser is absent from the fetched HTML response, the site may be inserting it with JavaScript. Web Data Assistant does not execute page JavaScript; in that situation the site's JSON/API request is normally a better source.
 
 HTML parsing and extraction are moved off Home Assistant's event loop. Runtime scrape sources parse each fetched document once and extract all configured values from that shared parsed document.
+
+## Long text values
+
+Home Assistant limits entity states to 255 characters. Web Data Assistant does not discard valid source data just because a text value exceeds that limit.
+
+Each source has a default long-text policy, and state-based sensors can override it individually:
+
+- **Shorten state + preserve full value** — the recommended/default behaviour. The Home Assistant state is shortened safely, while the complete source value remains available in `full_value`; `state_truncated` is set to `true`.
+- **Store full value as an attribute** — if the value grows beyond the state limit, the entity state becomes `Loaded` and the complete value is kept in `full_value`.
+- **Mark unavailable if too long** — strict compatibility behaviour for users who prefer Home Assistant's state limit to make the entity unavailable.
+
+Short values are unaffected by the selected policy. JSON values stored as attributes are not subject to the 255-character state limit, so this policy applies only to whichever extracted value is used as an entity state.
+
+Retained-state restoration uses the complete `full_value`, not a previously shortened state.
 
 ## Failure behaviour
 
@@ -47,13 +69,11 @@ Each source can choose what its entities should do when the website or API canno
 - **Mark sensors unavailable** — keep the entities loaded in Home Assistant but mark them unavailable while the source cannot be reached.
 - **Keep the last known value** — retain the most recent successful value during a temporary source outage.
 
-Both modes keep the config entry and its entities loaded if Home Assistant starts while the remote source is offline. This means the selected failure policy controls the entity state rather than an outage preventing the source from loading at all.
-
-Retained values survive Home Assistant restarts. If Home Assistant starts while the remote source is already offline, the entities can restore their previous successful state and replace it once live updates resume.
+Both modes keep the config entry and its entities loaded if Home Assistant starts while the remote source is offline. Retained values survive Home Assistant restarts and are replaced once live updates resume.
 
 When keeping the last value, an optional maximum stale age can eventually make the entity unavailable if successful updates do not resume. The original last-success timestamp is restored too, and a timer updates availability at the configured deadline rather than waiting for a later polling attempt.
 
-A source-connection failure and an extraction failure are deliberately treated differently. A temporary HTTP/DNS/timeout failure may retain the previous value when configured to do so. If the page loads but the configured selector or JSON path no longer exists, the affected entity becomes unavailable instead of silently presenting old data as current.
+A source-connection failure and an extraction failure are deliberately treated differently. A temporary HTTP/DNS/timeout failure may retain the previous value when configured to do so. If the page/API loads but a configured selector or JSON pointer no longer exists, the affected entity becomes unavailable instead of silently presenting old data as current.
 
 Sensors expose concise source-health information such as whether the latest source refresh succeeded and when the last successful update occurred. Connection errors are intentionally sanitized so request URLs or credentials are not exposed through state attributes.
 
@@ -61,20 +81,14 @@ Sensors expose concise source-health information such as whether the latest sour
 
 Web Data Assistant has two setup surfaces:
 
-- A dedicated **Web Data Assistant** admin panel provides the intended guided visual experience.
-- A conventional Home Assistant config flow remains available as a fallback.
+- A dedicated **Web Data Assistant** admin panel provides the intended guided experience, including the richer JSON output modes and per-sensor long-text choices.
+- A conventional Home Assistant config flow remains available as a simpler fallback/compatibility setup path.
 
 Starting **Add Integration → Web Data Assistant** registers the guided panel immediately, so the visual workflow can be used before the first data source has been created.
 
 The panel also includes a configured-source dashboard showing source type, privacy-safe endpoint, update interval, source health, last successful update and extraction-health information. Loaded sources can be refreshed manually from the panel.
 
 Sensors created from the same source are grouped under one Home Assistant service device.
-
-## Long values
-
-Home Assistant limits entity states to 255 characters. If a scraped or API text value exceeds that limit, Web Data Assistant publishes a safe shortened state and preserves the complete text in the `full_value` attribute. Retained-state restoration uses the complete value, not the shortened state.
-
-Full JSON responses are handled separately: the sensor state is `Loaded` and the structured response is stored in the `data` attribute.
 
 ## Request support
 
@@ -141,64 +155,66 @@ tests/
 ├── test_extraction_preview.py
 ├── test_frontend_runtime.py
 ├── test_integration.py
+├── test_json_attributes_runtime.py
 ├── test_runtime_semantics.py
-└── test_scrape_flow_runtime.py
+├── test_scrape_flow_runtime.py
+├── test_websocket_json_attributes.py
+└── ...
 
 tests_browser/
 ├── error-states.spec.js
+├── json-filter-selection.spec.js
 ├── json-large.spec.js
 ├── json-pointer.spec.js
 ├── panel-load.spec.js
-├── preview-safety.spec.js
 ├── request-options.spec.js
-├── request-validation.spec.js
 ├── responsive.spec.js
-├── scrape-click.spec.js
 ├── scrape-text.spec.js
 ├── source-health.spec.js
-└── source-refresh.spec.js
+└── ...
 ```
+
+`preview.py` and the internal HTML-preview WebSocket command remain for compatibility/testing, but the primary guided panel no longer embeds or renders a page preview.
 
 ## Validation
 
 GitHub Actions performs Python compilation, JSON validation, frontend JavaScript syntax checking and Home Assistant hassfest validation.
 
-A lightweight behavioral suite exercises the pure extraction and preview helpers without booting Home Assistant. It covers JSON Pointer escaping/resolution, discovery truncation, visible-text matching, extraction-error isolation, preview sanitization, URL-secret removal and generated-selector fidelity.
+A lightweight behavioral suite exercises extraction/HTML helper behavior without booting Home Assistant. It covers JSON Pointer escaping/resolution, discovery truncation, visible-text matching, extraction-error isolation and selector generation/sanitization helpers.
 
-A separate runtime suite is pinned to **Home Assistant 2026.9.2** through `pytest-homeassistant-custom-component==0.13.365`. It boots the integration inside Home Assistant and currently verifies:
+A separate runtime suite is pinned to **Home Assistant 2026.9.2** through `pytest-homeassistant-custom-component==0.13.365`. It boots the integration inside Home Assistant and verifies, among other things:
 
 - config-entry setup and actual sensor state publication
-- startup source outages and unavailable entities
-- keep-last behavior during later source outages
-- restore-state behavior when Home Assistant restarts while the source is offline
-- exact stale-age expiry using Home Assistant time events
-- HTML scrape extraction, full-JSON attributes and long-state handling
-- multiple JSON sensors sharing one coordinator fetch and one HA service device
-- extraction failures remaining distinct from source failures and recovering on a later refresh
-- sidebar panel registration and the management WebSocket API
-- panel-driven `create_source` creating a working Home Assistant config entry
-- manual source refresh and privacy-safe URL display
-- guided JSON and guided scrape config-flow persistence
-- invalid source URL rejection
-- options-flow persistence and automatic runtime reload
+- startup and later source outages
+- keep-last and restore-state behavior across restarts
+- exact stale-age expiry
+- extraction failures remaining distinct from source failures and later recovery
+- multiple values sharing one coordinator fetch and one service device
+- JSON state + selected attributes on one entity
+- structured nested JSON dictionaries/lists as entity attributes
+- attribute-only JSON entities using the stable `Loaded` state
+- all three long-text policies
+- panel registration and management WebSocket APIs
+- panel-driven source creation and manual source refresh
+- privacy-safe URL display
+- guided JSON/scrape fallback config flows and options reload
+- WebSocket schema, authorization and JSON-attribute validation
 
-The same Home Assistant job also exercises `WebDataClient` against a real local HTTP server, covering redirects, chunked responses, non-2xx errors, malformed and non-standard JSON, declared and streaming response-size limits, request timeouts, and POST headers/body transmission.
+The same Home Assistant job also exercises `WebDataClient` against a real local HTTP server, covering redirects, chunked responses, compressed data, non-2xx errors, malformed and non-standard JSON, charsets, declared and streaming response-size limits, request timeouts, and POST headers/body transmission.
 
 A separate Playwright/Chromium suite renders the actual custom panel JavaScript and covers:
 
 - clean initial rendering and configured-source loading
-- guided multi-sensor JSON creation, names and units
-- full-response JSON mode and its Recorder warning
-- click-to-select scraping inside the sandboxed preview iframe
-- current-text scrape search with ambiguous-match disambiguation
-- preview sandbox protection against scripts and form navigation
-- unavailable, retained and extraction-degraded source health states
-- manual source refresh
-- truncated 250-value JSON discovery and filtering
+- JSON separate-sensor creation, names, units, scalar types and escaped pointers
+- one JSON sensor with a selected state plus attributes
+- root-object import with structured attributes
+- text-first scrape matching and ambiguous-match disambiguation
+- confirmation that the primary scrape panel does not use an iframe
+- source/default long-text handling controls
+- source health, stale retained states and manual refresh
+- large/truncated JSON discovery and filtering
 - narrow/mobile-width layout without horizontal overflow
-- advanced POST/header/body/SSL/failure/stale settings
-- escaped RFC 6901 JSON pointers
-- source-load error recovery and local request validation
+- request settings, validation, error recovery and save-state preservation
 
 The Chromium tests mock the panel's `hass.callWS` boundary so they remain deterministic and fast; the real Home Assistant suite independently exercises the actual WebSocket commands and integration runtime behind that boundary. The project does not yet launch the complete authenticated Home Assistant frontend shell in Playwright, so that full-stack UI boundary remains a later test opportunity.
 

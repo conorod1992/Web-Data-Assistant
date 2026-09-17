@@ -38,7 +38,7 @@ test("create action is disabled while source creation is in flight", async ({ pa
   const shadow = page.locator("web-data-assistant-panel").locator(":scope");
   await shadow.getByLabel("Source name").fill("Weather");
   await shadow.getByLabel("URL").fill("https://example.test/weather.json");
-  await shadow.getByRole("button", { name: "Load source" }).click();
+  await shadow.getByRole("button", { name: "Load JSON" }).click();
   await shadow.locator(".json-row").filter({ hasText: "temperature" }).locator("input[type=checkbox]").check();
 
   const create = shadow.getByRole("button", { name: "Create in Home Assistant" });

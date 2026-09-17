@@ -33,7 +33,7 @@ test("JSON filtering preserves selections hidden by the filter", async ({ page }
   const shadow = page.locator("web-data-assistant-panel").locator(":scope");
   await shadow.getByLabel("Source name").fill("Weather");
   await shadow.getByLabel("URL").fill("https://example.test/weather.json");
-  await shadow.getByRole("button", { name: "Load source" }).click();
+  await shadow.getByRole("button", { name: "Load JSON" }).click();
 
   const temperatureRow = shadow.locator(".json-row").filter({ hasText: "temperature" });
   await temperatureRow.locator("input[type=checkbox]").check();

@@ -37,7 +37,7 @@ test("guided JSON maps discovered scalar types to entity value types", async ({ 
   const shadow = page.locator("web-data-assistant-panel").locator(":scope");
   await shadow.getByLabel("Source name").fill("Typed API");
   await shadow.getByLabel("URL").fill("https://example.test/data.json");
-  await shadow.getByRole("button", { name: "Load source" }).click();
+  await shadow.getByRole("button", { name: "Load JSON" }).click();
   for (const label of ["online", "count", "label"]) {
     await shadow.locator(".json-row").filter({ hasText: label }).locator("input[type=checkbox]").check();
   }

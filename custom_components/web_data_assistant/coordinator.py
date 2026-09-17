@@ -83,11 +83,20 @@ class WebDataCoordinator(DataUpdateCoordinator[ExtractionResult]):
             for entity in entity_configs:
                 try:
                     if entity.path is None:
-                        raise ValueError("No JSON path is configured")
-                    result.values[entity.key] = resolve_json_pointer(
-                        response.json_data,
-                        entity.path,
-                    )
+                        if not entity.attributes:
+                            raise ValueError("No JSON state path or attributes are configured")
+                        result.values[entity.key] = "Loaded"
+                    else:
+                        result.values[entity.key] = resolve_json_pointer(
+                            response.json_data,
+                            entity.path,
+                        )
+
+                    if entity.attributes:
+                        result.attributes[entity.key] = {
+                            name: resolve_json_pointer(response.json_data, path)
+                            for name, path in entity.attributes.items()
+                        }
                 except (KeyError, TypeError, ValueError) as err:
                     result.extraction_errors[entity.key] = str(err)
         else:
@@ -109,6 +118,12 @@ class WebDataCoordinator(DataUpdateCoordinator[ExtractionResult]):
         if self.data is None:
             return None
         return self.data.values.get(key)
+
+    def attributes_for(self, key: str) -> dict[str, Any]:
+        """Return the most recent extracted JSON attributes for an entity."""
+        if self.data is None:
+            return {}
+        return self.data.attributes.get(key, {})
 
     def extraction_error_for(self, key: str) -> str | None:
         """Return the latest extraction error for an entity."""

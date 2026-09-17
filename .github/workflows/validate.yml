@@ -88,9 +88,11 @@ jobs:
           tests/test_config_flow_runtime.py
           tests/test_scrape_flow_runtime.py
           tests/test_runtime_semantics.py
+          tests/test_json_attributes_runtime.py
           tests/test_client_http.py
           tests/test_client_http_content_type.py
           tests/test_websocket_validation.py
+          tests/test_websocket_json_attributes.py
           tests/test_websocket_refresh_auth.py
           tests/test_websocket_preview_auth.py
           tests/test_websocket_schema.py
