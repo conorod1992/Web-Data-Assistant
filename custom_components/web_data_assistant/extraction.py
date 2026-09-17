@@ -8,7 +8,12 @@ from typing import Any
 from bs4 import BeautifulSoup, Tag
 
 from .const import MAX_HTML_MATCHES, MAX_JSON_DISCOVERY_VALUES, MAX_PREVIEW_LENGTH
-from .models import HtmlMatch, JsonCandidate
+from .models import (
+    ExtractionResult,
+    HtmlMatch,
+    JsonCandidate,
+    WebDataEntityConfig,
+)
 
 _NON_VISIBLE_TEXT_TAGS = {"head", "script", "style", "template", "noscript"}
 
@@ -218,14 +223,13 @@ def find_html_text_matches(html: str, search_text: str) -> list[HtmlMatch]:
     return matches
 
 
-def extract_html_value(
-    html: str,
+def extract_html_value_from_soup(
+    soup: BeautifulSoup,
     selector: str,
     index: int = 0,
     attribute: str | None = None,
 ) -> str:
-    """Extract one value from HTML using a generated or advanced selector."""
-    soup = BeautifulSoup(html, "html.parser")
+    """Extract one value from an already parsed HTML document."""
     matches = soup.select(selector)
     if index < 0 or index >= len(matches):
         raise KeyError(
@@ -242,3 +246,36 @@ def extract_html_value(
         return str(value)
 
     return _normalise_text(selected.get_text(" ", strip=True))
+
+
+def extract_html_value(
+    html: str,
+    selector: str,
+    index: int = 0,
+    attribute: str | None = None,
+) -> str:
+    """Extract one value from HTML using a generated or advanced selector."""
+    soup = BeautifulSoup(html, "html.parser")
+    return extract_html_value_from_soup(soup, selector, index, attribute)
+
+
+def extract_html_entities(
+    html: str,
+    entities: list[WebDataEntityConfig],
+) -> ExtractionResult:
+    """Parse HTML once and extract all configured values from the document."""
+    soup = BeautifulSoup(html, "html.parser")
+    result = ExtractionResult()
+    for entity in entities:
+        try:
+            if entity.selector is None:
+                raise ValueError("No HTML selector is configured")
+            result.values[entity.key] = extract_html_value_from_soup(
+                soup,
+                entity.selector,
+                entity.index,
+                entity.attribute,
+            )
+        except (KeyError, TypeError, ValueError) as err:
+            result.extraction_errors[entity.key] = str(err)
+    return result
