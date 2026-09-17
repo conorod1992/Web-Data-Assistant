@@ -20,6 +20,7 @@ from custom_components.web_data_assistant.const import (
     FAILURE_UNAVAILABLE,
     SOURCE_JSON,
     SOURCE_SCRAPE,
+    VALUE_JSON,
     VALUE_NUMBER,
     VALUE_TEXT,
 )
@@ -111,5 +112,49 @@ async def test_create_source_rejects_json_path_on_scrape_sensor(
     assert message["success"] is False
     assert message["error"]["code"] == "invalid_entities"
     assert "Web page sensors cannot contain a JSON path" in message["error"]["message"]
+    fetch.assert_not_awaited()
+    assert hass.config_entries.async_entries(DOMAIN) == []
+
+
+async def test_create_source_rejects_full_json_type_on_scrape_sensor(
+    hass: HomeAssistant,
+    hass_ws_client,
+) -> None:
+    """Reject the structured full-response value type for a web-page sensor."""
+    flow = await hass.config_entries.flow.async_init(
+        DOMAIN,
+        context={"source": SOURCE_USER},
+    )
+    assert flow["step_id"] == "user"
+
+    fetch = AsyncMock()
+    client = await hass_ws_client(hass)
+    with patch(
+        "custom_components.web_data_assistant.client.WebDataClient.async_fetch",
+        new=fetch,
+    ):
+        await client.send_json(
+            {
+                "id": 1,
+                "type": f"{DOMAIN}/create_source",
+                CONF_SOURCE_NAME: "Wrong Scrape Value Type",
+                CONF_SOURCE_TYPE: SOURCE_SCRAPE,
+                CONF_URL: "https://example.test/page",
+                CONF_FAILURE_MODE: FAILURE_UNAVAILABLE,
+                CONF_ENTITIES: [
+                    {
+                        "key": "page_data",
+                        "name": "Page Data",
+                        CONF_SELECTOR: ".data",
+                        CONF_VALUE_TYPE: VALUE_JSON,
+                    }
+                ],
+            }
+        )
+        message = await client.receive_json()
+
+    assert message["success"] is False
+    assert message["error"]["code"] == "invalid_entities"
+    assert "Web page sensors cannot use the full JSON value type" in message["error"]["message"]
     fetch.assert_not_awaited()
     assert hass.config_entries.async_entries(DOMAIN) == []
