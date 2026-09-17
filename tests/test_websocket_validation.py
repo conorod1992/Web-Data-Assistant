@@ -11,6 +11,7 @@ from custom_components.web_data_assistant.const import (
     CONF_ENTITIES,
     CONF_FAILURE_MODE,
     CONF_PATH,
+    CONF_SELECTOR,
     CONF_SOURCE_NAME,
     CONF_SOURCE_TYPE,
     CONF_URL,
@@ -179,6 +180,53 @@ async def test_create_source_rejects_json_path_absent_from_sample(
                         "name": "Humidity",
                         CONF_PATH: "/humidity",
                         CONF_VALUE_TYPE: VALUE_NUMBER,
+                    }
+                ],
+            }
+        )
+        message = await client.receive_json()
+
+    assert message["success"] is False
+    assert message["error"]["code"] == "validation_failed"
+    assert hass.config_entries.async_entries(DOMAIN) == []
+
+
+async def test_create_source_rejects_scrape_selector_absent_from_sample(
+    hass: HomeAssistant,
+    hass_ws_client,
+) -> None:
+    """Reject a selected CSS selector that no longer matches the validation page."""
+    flow = await hass.config_entries.flow.async_init(
+        DOMAIN,
+        context={"source": SOURCE_USER},
+    )
+    assert flow["step_id"] == "user"
+
+    response = FetchResponse(
+        status=200,
+        content_type="text/html",
+        text="<html><body><span class='humidity'>82%</span></body></html>",
+        json_data=None,
+    )
+    client = await hass_ws_client(hass)
+    with patch(
+        "custom_components.web_data_assistant.client.WebDataClient.async_fetch",
+        new=AsyncMock(return_value=response),
+    ):
+        await client.send_json(
+            {
+                "id": 1,
+                "type": f"{DOMAIN}/create_source",
+                CONF_SOURCE_NAME: "Missing Scrape Value",
+                CONF_SOURCE_TYPE: SOURCE_SCRAPE,
+                CONF_URL: "https://example.test/page",
+                CONF_FAILURE_MODE: FAILURE_UNAVAILABLE,
+                CONF_ENTITIES: [
+                    {
+                        "key": "temperature",
+                        "name": "Temperature",
+                        CONF_SELECTOR: ".temperature",
+                        CONF_VALUE_TYPE: VALUE_TEXT,
                     }
                 ],
             }
