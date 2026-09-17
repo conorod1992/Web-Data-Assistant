@@ -117,6 +117,26 @@ if (WebDataAssistantPanel && !WebDataAssistantPanel.prototype.__sourceLifecycleI
     const entities = this._editingOriginalEntities;
     if (entities.length === 1 && entities[0].attributes && Object.keys(entities[0].attributes).length) {
       const entity = entities[0];
+      const rootFields = this._jsonResult?.root_fields || [];
+      const storedAttributePaths = Object.values(entity.attributes);
+      const rootFieldPaths = rootFields.map((field) => field.path);
+      const isStructuredRootImport = !entity.path && (
+        (
+          rootFieldPaths.length > 0
+          && storedAttributePaths.length === rootFieldPaths.length
+          && storedAttributePaths.every((path) => rootFieldPaths.includes(path))
+        )
+        || (
+          rootFieldPaths.length === 0
+          && Object.keys(entity.attributes).length === 1
+          && entity.attributes.items === ""
+        )
+      );
+      if (isStructuredRootImport) {
+        this._jsonMode = "object";
+        return;
+      }
+
       this._jsonMode = "aggregate";
       this._jsonStatePath = entity.path || "";
       this._aggregateUnit = entity.unit || "";
