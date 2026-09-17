@@ -1,0 +1,37 @@
+name: Validate
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  syntax:
+    name: Syntax and metadata
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.14
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      - name: Compile Python sources
+        run: python -m compileall -q custom_components/web_data_assistant
+
+      - name: Validate JSON files
+        shell: bash
+        run: |
+          while IFS= read -r -d '' file; do
+            echo "Checking ${file}"
+            python -m json.tool "${file}" >/dev/null
+          done < <(find custom_components/web_data_assistant -name '*.json' -print0)
+          python -m json.tool hacs.json >/dev/null
+
+      - name: Check frontend JavaScript syntax
+        run: node --check custom_components/web_data_assistant/frontend/web-data-assistant-panel.js
