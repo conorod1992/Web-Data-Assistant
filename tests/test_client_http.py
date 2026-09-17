@@ -4,8 +4,12 @@ from __future__ import annotations
 
 from aiohttp import web
 from homeassistant.core import HomeAssistant
+import pytest
 
-from custom_components.web_data_assistant.client import WebDataClient
+from custom_components.web_data_assistant.client import (
+    WebDataClient,
+    WebDataConnectionError,
+)
 
 
 async def test_client_follows_http_redirects(
@@ -67,3 +71,21 @@ async def test_client_reads_complete_chunked_response(
     assert response.status == 200
     assert response.json_data == {"temperature": 14.6, "condition": "Cloudy"}
     assert response.text == '{"temperature":14.6,"condition":"Cloudy"}'
+
+
+async def test_client_classifies_http_503_as_source_failure(
+    hass: HomeAssistant,
+    aiohttp_server,
+    socket_enabled,
+) -> None:
+    """Treat a non-2xx response as a connection/source failure."""
+    app = web.Application()
+
+    async def unavailable(_request: web.Request) -> web.Response:
+        return web.Response(status=503, text="maintenance")
+
+    app.router.add_get("/unavailable", unavailable)
+    server = await aiohttp_server(app)
+
+    with pytest.raises(WebDataConnectionError, match="Source returned HTTP 503"):
+        await WebDataClient(hass).async_fetch(str(server.make_url("/unavailable")))
