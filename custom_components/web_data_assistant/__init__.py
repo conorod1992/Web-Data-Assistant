@@ -9,6 +9,7 @@ from homeassistant.helpers.typing import ConfigType
 from .const import CONF_FAILURE_MODE, FAILURE_KEEP_LAST, PLATFORMS
 from .coordinator import WebDataCoordinator
 from .frontend import async_register_frontend
+from .management import async_register_management_commands
 from .websocket import async_register_websocket_commands
 
 type WebDataAssistantConfigEntry = ConfigEntry[WebDataCoordinator]
@@ -17,6 +18,7 @@ type WebDataAssistantConfigEntry = ConfigEntry[WebDataCoordinator]
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     """Set up integration-wide Web Data Assistant functionality."""
     async_register_websocket_commands(hass)
+    async_register_management_commands(hass)
     await async_register_frontend(hass)
     return True
 
