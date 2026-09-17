@@ -3,6 +3,7 @@
   "name": "Web Data Assistant",
   "codeowners": ["@conorod1992"],
   "config_flow": true,
+  "dependencies": ["frontend"],
   "documentation": "https://github.com/conorod1992/Web-Data-Assistant",
   "integration_type": "service",
   "iot_class": "cloud_polling",
