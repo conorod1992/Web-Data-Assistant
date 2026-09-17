@@ -19,6 +19,7 @@ from .const import (
     FAILURE_KEEP_LAST,
     FAILURE_UNAVAILABLE,
     VALUE_BOOLEAN,
+    VALUE_JSON,
     VALUE_NUMBER,
 )
 from .coordinator import WebDataCoordinator
@@ -29,6 +30,9 @@ def _coerce_value(value: Any, value_type: str) -> Any:
     """Coerce an extracted value into a Home Assistant-friendly state."""
     if value is None:
         return None
+
+    if value_type == VALUE_JSON:
+        return "Loaded"
 
     if value_type == VALUE_NUMBER:
         if isinstance(value, bool):
@@ -140,10 +144,12 @@ class WebDataSensor(CoordinatorEntity[WebDataCoordinator], SensorEntity):
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        """Expose concise source health information alongside the value."""
+        """Expose source health and, for full JSON sensors, the payload itself."""
         attributes: dict[str, Any] = {
             "source_available": self.coordinator.last_update_success,
         }
+        if self._config.value_type == VALUE_JSON:
+            attributes["data"] = self.coordinator.value_for(self._config.key)
         if self.coordinator.last_successful_update is not None:
             attributes["last_successful_update"] = self.coordinator.last_successful_update.isoformat()
         if self.coordinator.last_source_error:
