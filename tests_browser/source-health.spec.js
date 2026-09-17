@@ -106,9 +106,7 @@ test("expired keep-last source is no longer labelled retained", async ({ page })
 });
 
 test("keep-last source inside its stale window remains labelled retained", async ({ page }) => {
-  await page.addInitScript(() => {
-    Date.now = () => new Date("2026-09-17T18:00:00Z").getTime();
-  });
+  const recentSuccess = new Date(Date.now() - 15 * 60_000).toISOString();
   await mountWithSources(page, [
     {
       entry_id: "recent",
@@ -122,7 +120,7 @@ test("keep-last source inside its stale window remains labelled retained", async
       max_stale_minutes: 30,
       source_available: false,
       extraction_error_count: 0,
-      last_successful_update: "2026-09-17T17:45:00+00:00",
+      last_successful_update: recentSuccess,
     },
   ]);
 
