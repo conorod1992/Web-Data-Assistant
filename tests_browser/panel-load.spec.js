@@ -64,42 +64,18 @@ test("guided JSON workflow selects, reviews and saves multiple sensors", async (
       content_type: "application/json",
       truncated: false,
       values: [
-        {
-          path: "/current/temperature",
-          display_path: "current.temperature",
-          preview: "14.6",
-          value_type: "float",
-        },
-        {
-          path: "/current/humidity",
-          display_path: "current.humidity",
-          preview: "82",
-          value_type: "int",
-        },
-        {
-          path: "/current/condition",
-          display_path: "current.condition",
-          preview: "Cloudy",
-          value_type: "str",
-        },
+        { path: "/current/temperature", display_path: "current.temperature", preview: "14.6", value_type: "float" },
+        { path: "/current/humidity", display_path: "current.humidity", preview: "82", value_type: "int" },
+        { path: "/current/condition", display_path: "current.condition", preview: "Cloudy", value_type: "str" },
       ],
     },
     createdSources: {
-      sources: [
-        {
-          entry_id: "entry-1",
-          title: "Carlow Weather",
-          source_type: "json",
-          url: "https://example.test/weather.json",
-          entity_count: 2,
-          scan_interval: 5,
-          failure_mode: "unavailable",
-          source_available: true,
-          extraction_error_count: 0,
-          last_successful_update: "2026-09-17T17:00:00+00:00",
-          state: "loaded",
-        },
-      ],
+      sources: [{
+        entry_id: "entry-1", title: "Carlow Weather", source_type: "json",
+        url: "https://example.test/weather.json", entity_count: 2, scan_interval: 5,
+        failure_mode: "unavailable", source_available: true, extraction_error_count: 0,
+        last_successful_update: "2026-09-17T17:00:00+00:00", state: "loaded",
+      }],
     },
   });
 
@@ -107,13 +83,10 @@ test("guided JSON workflow selects, reviews and saves multiple sensors", async (
   await shadow.getByLabel("Source name").fill("Carlow Weather");
   await shadow.getByLabel("URL").fill("https://example.test/weather.json");
   await shadow.getByRole("button", { name: "Load source" }).click();
-
   await expect(shadow.getByText("Loaded 3 selectable JSON values.")).toBeVisible();
 
-  const temperatureRow = shadow.locator(".json-row").filter({ hasText: "current.temperature" });
-  const humidityRow = shadow.locator(".json-row").filter({ hasText: "current.humidity" });
-  await temperatureRow.locator("input[type=checkbox]").check();
-  await humidityRow.locator("input[type=checkbox]").check();
+  await shadow.locator(".json-row").filter({ hasText: "current.temperature" }).locator("input[type=checkbox]").check();
+  await shadow.locator(".json-row").filter({ hasText: "current.humidity" }).locator("input[type=checkbox]").check();
 
   const temperatureReview = shadow.locator(".sensor-review-row").filter({ hasText: "current.temperature" });
   const humidityReview = shadow.locator(".sensor-review-row").filter({ hasText: "current.humidity" });
@@ -125,7 +98,6 @@ test("guided JSON workflow selects, reviews and saves multiple sensors", async (
   const createButton = shadow.getByRole("button", { name: "Create in Home Assistant" });
   await expect(createButton).toBeEnabled();
   await createButton.click();
-
   await expect(shadow.getByText("Created Carlow Weather successfully.")).toBeVisible();
   await expect(shadow.getByText("Carlow Weather", { exact: true }).first()).toBeVisible();
 
@@ -137,20 +109,8 @@ test("guided JSON workflow selects, reviews and saves multiple sensors", async (
     source_name: "Carlow Weather",
     source_type: "json",
     entities: [
-      {
-        key: "current_temperature",
-        name: "Outdoor Temperature",
-        path: "/current/temperature",
-        value_type: "number",
-        unit: "°C",
-      },
-      {
-        key: "current_humidity",
-        name: "Relative Humidity",
-        path: "/current/humidity",
-        value_type: "number",
-        unit: "%",
-      },
+      { key: "current_temperature", name: "Outdoor Temperature", path: "/current/temperature", value_type: "number", unit: "°C" },
+      { key: "current_humidity", name: "Relative Humidity", path: "/current/humidity", value_type: "number", unit: "%" },
     ],
     scan_interval: 5,
     failure_mode: "unavailable",
@@ -159,4 +119,38 @@ test("guided JSON workflow selects, reviews and saves multiple sensors", async (
     headers: {},
     verify_ssl: true,
   });
+});
+
+test("full JSON mode warns about Recorder impact and saves a structured response sensor", async ({ page }) => {
+  await mountPanel(page, {
+    "web_data_assistant/preview_json": {
+      status: 200,
+      content_type: "application/json",
+      truncated: false,
+      values: [
+        { path: "/current/temperature", display_path: "current.temperature", preview: "14.6", value_type: "float" },
+      ],
+    },
+  });
+
+  const shadow = page.locator("web-data-assistant-panel").locator(":scope");
+  await shadow.getByLabel("Source name").fill("Raw Weather Data");
+  await shadow.getByLabel("URL").fill("https://example.test/weather.json");
+  await shadow.getByRole("button", { name: "Load source" }).click();
+  await shadow.getByRole("button", { name: /Keep full response/ }).click();
+
+  await expect(shadow.getByText(/Large or frequently changing responses can substantially increase Recorder database usage/)).toBeVisible();
+  const createButton = shadow.getByRole("button", { name: "Create in Home Assistant" });
+  await expect(createButton).toBeEnabled();
+  await createButton.click();
+  await expect(shadow.getByText("Created Raw Weather Data successfully.")).toBeVisible();
+
+  const createMessage = await page.evaluate(() =>
+    window.__webDataMessages.find((message) => message.type === "web_data_assistant/create_source")
+  );
+  expect(createMessage.source_name).toBe("Raw Weather Data");
+  expect(createMessage.source_type).toBe("json");
+  expect(createMessage.entities).toEqual([
+    { key: "full_response", name: "Raw Weather Data", path: "", value_type: "json" },
+  ]);
 });
