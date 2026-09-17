@@ -10,7 +10,9 @@ import voluptuous as vol
 from homeassistant.components import websocket_api
 from homeassistant.config_entries import ConfigEntry, ConfigEntryState
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import entity_registry as er
 
+from .client import WebDataClient, WebDataError
 from .const import (
     CONF_ENTITIES,
     CONF_FAILURE_MODE,
@@ -18,6 +20,7 @@ from .const import (
     CONF_LONG_TEXT_POLICY,
     CONF_MAX_STALE_MINUTES,
     CONF_METHOD,
+    CONF_PATH,
     CONF_PAYLOAD,
     CONF_SCAN_INTERVAL,
     CONF_SOURCE_NAME,
@@ -30,9 +33,19 @@ from .const import (
     DEFAULT_SCAN_INTERVAL_MINUTES,
     DEFAULT_VERIFY_SSL,
     DOMAIN,
+    FAILURE_KEEP_LAST,
     METHOD_GET,
+    SOURCE_JSON,
 )
 from .coordinator import WebDataCoordinator
+from .extraction import extract_html_entities, resolve_json_pointer
+from .models import WebDataEntityConfig
+from .websocket import (
+    _COMMON_FIELDS,
+    _ENTITY_SCHEMA,
+    _fetch_kwargs,
+    _validate_entity_definitions,
+)
 
 
 def _safe_display_url(value: str) -> str:
@@ -131,6 +144,63 @@ def _editable_source(entry: ConfigEntry) -> dict[str, Any]:
     }
 
 
+async def _validate_update(hass: HomeAssistant, msg: dict[str, Any]) -> None:
+    """Validate an edited source against a fresh response before applying it."""
+    source_type = msg[CONF_SOURCE_TYPE]
+    entities = msg[CONF_ENTITIES]
+    _validate_entity_definitions(source_type, entities)
+
+    client = WebDataClient(hass)
+    response = await client.async_fetch(
+        msg[CONF_URL],
+        **_fetch_kwargs(msg),
+        parse_json=source_type == SOURCE_JSON,
+    )
+    if source_type == SOURCE_JSON:
+        for entity in entities:
+            if CONF_PATH in entity:
+                resolve_json_pointer(response.json_data, str(entity[CONF_PATH]))
+            for path in entity.get("attributes", {}).values():
+                resolve_json_pointer(response.json_data, str(path))
+        return
+
+    entity_configs = [WebDataEntityConfig.from_dict(entity) for entity in entities]
+    validation_result = await hass.async_add_executor_job(
+        extract_html_entities,
+        response.text,
+        entity_configs,
+    )
+    if validation_result.extraction_errors:
+        first_key, first_error = next(iter(validation_result.extraction_errors.items()))
+        raise ValueError(f"{first_key}: {first_error}")
+
+
+def _updated_entry_data(msg: dict[str, Any]) -> dict[str, Any]:
+    """Build persisted config-entry data from an edit message."""
+    data: dict[str, Any] = {
+        CONF_SOURCE_NAME: msg[CONF_SOURCE_NAME],
+        CONF_SOURCE_TYPE: msg[CONF_SOURCE_TYPE],
+        CONF_URL: msg[CONF_URL],
+        CONF_METHOD: msg.get(CONF_METHOD, METHOD_GET),
+        CONF_HEADERS: msg.get(CONF_HEADERS, {}),
+        CONF_VERIFY_SSL: msg.get(CONF_VERIFY_SSL, DEFAULT_VERIFY_SSL),
+        CONF_SCAN_INTERVAL: msg.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL_MINUTES),
+        CONF_FAILURE_MODE: msg.get(CONF_FAILURE_MODE, DEFAULT_FAILURE_MODE),
+        CONF_LONG_TEXT_POLICY: msg.get(
+            CONF_LONG_TEXT_POLICY, DEFAULT_LONG_TEXT_POLICY
+        ),
+        CONF_ENTITIES: msg[CONF_ENTITIES],
+    }
+    if payload := msg.get(CONF_PAYLOAD):
+        data[CONF_PAYLOAD] = payload
+    if (
+        msg.get(CONF_FAILURE_MODE, DEFAULT_FAILURE_MODE) == FAILURE_KEEP_LAST
+        and (stale := msg.get(CONF_MAX_STALE_MINUTES))
+    ):
+        data[CONF_MAX_STALE_MINUTES] = stale
+    return data
+
+
 @websocket_api.websocket_command(
     {vol.Required("type"): f"{DOMAIN}/list_sources"}
 )
@@ -168,6 +238,77 @@ async def websocket_get_source(
         connection.send_error(msg["id"], "not_found", "Source was not found")
         return
     connection.send_result(msg["id"], _editable_source(entry))
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/update_source",
+        vol.Required("entry_id"): str,
+        vol.Required(CONF_SOURCE_NAME): vol.All(str, vol.Length(min=1, max=100)),
+        vol.Required(CONF_SOURCE_TYPE): vol.In(["json", "scrape"]),
+        vol.Required(CONF_ENTITIES): vol.All([_ENTITY_SCHEMA], vol.Length(min=1, max=100)),
+        vol.Optional(CONF_SCAN_INTERVAL, default=DEFAULT_SCAN_INTERVAL_MINUTES): vol.All(
+            vol.Coerce(int), vol.Range(min=1, max=1440)
+        ),
+        vol.Optional(CONF_FAILURE_MODE, default=DEFAULT_FAILURE_MODE): vol.In(
+            ["unavailable", "keep_last"]
+        ),
+        vol.Optional(CONF_MAX_STALE_MINUTES): vol.All(
+            vol.Coerce(int), vol.Range(min=1, max=525600)
+        ),
+        vol.Optional(CONF_LONG_TEXT_POLICY, default=DEFAULT_LONG_TEXT_POLICY): vol.In(
+            ["truncate", "attribute_only", "unavailable"]
+        ),
+        **_COMMON_FIELDS,
+    }
+)
+@websocket_api.require_admin
+@websocket_api.async_response
+async def websocket_update_source(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Validate and update an existing source while preserving its entry identity."""
+    entry = _find_entry(hass, msg["entry_id"])
+    if entry is None:
+        connection.send_error(msg["id"], "not_found", "Source was not found")
+        return
+
+    try:
+        await _validate_update(hass, msg)
+    except (WebDataError, KeyError, TypeError, ValueError) as err:
+        connection.send_error(msg["id"], "validation_failed", str(err))
+        return
+
+    old_keys = {str(entity["key"]) for entity in entry.data.get(CONF_ENTITIES, [])}
+    new_keys = {str(entity["key"]) for entity in msg[CONF_ENTITIES]}
+    options = dict(entry.options)
+    for key in (
+        CONF_SCAN_INTERVAL,
+        CONF_FAILURE_MODE,
+        CONF_MAX_STALE_MINUTES,
+        CONF_LONG_TEXT_POLICY,
+    ):
+        options.pop(key, None)
+
+    hass.config_entries.async_update_entry(
+        entry,
+        title=msg[CONF_SOURCE_NAME].strip(),
+        data=_updated_entry_data(msg),
+        options=options,
+    )
+    await hass.config_entries.async_reload(entry.entry_id)
+
+    registry = er.async_get(hass)
+    for key in old_keys - new_keys:
+        entity_id = registry.async_get_entity_id(
+            "sensor", DOMAIN, f"{entry.entry_id}_{key}"
+        )
+        if entity_id is not None:
+            registry.async_remove(entity_id)
+
+    connection.send_result(msg["id"], _entry_snapshot(entry))
 
 
 @websocket_api.websocket_command(
@@ -232,6 +373,7 @@ def async_register_management_commands(hass: HomeAssistant) -> None:
 
     websocket_api.async_register_command(hass, websocket_list_sources)
     websocket_api.async_register_command(hass, websocket_get_source)
+    websocket_api.async_register_command(hass, websocket_update_source)
     websocket_api.async_register_command(hass, websocket_refresh_source)
     websocket_api.async_register_command(hass, websocket_delete_source)
     domain_data[DATA_MANAGEMENT_REGISTERED] = True
