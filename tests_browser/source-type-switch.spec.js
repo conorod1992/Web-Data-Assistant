@@ -32,7 +32,7 @@ test("switching source type clears loaded JSON data and selection", async ({ pag
   const shadow = page.locator("web-data-assistant-panel").locator(":scope");
   await shadow.getByLabel("Source name").fill("Weather");
   await shadow.getByLabel("URL").fill("https://example.test/weather.json");
-  await shadow.getByRole("button", { name: "Load source" }).click();
+  await shadow.getByRole("button", { name: "Load JSON" }).click();
   await shadow.locator(".json-row").filter({ hasText: "temperature" }).locator("input[type=checkbox]").check();
   await expect(shadow.getByText("1 value selected.")).toBeVisible();
   await expect(shadow.getByRole("button", { name: "Create in Home Assistant" })).toBeEnabled();
@@ -44,7 +44,7 @@ test("switching source type clears loaded JSON data and selection", async ({ pag
   await expect(shadow.getByRole("button", { name: "Create in Home Assistant" })).toBeDisabled();
 
   await shadow.getByRole("button", { name: /JSON \/ API/ }).click();
-  await expect(shadow.getByRole("heading", { name: "2. Choose data", level: 2 })).toBeVisible();
+  await expect(shadow.getByRole("heading", { name: "2. Choose JSON data", level: 2 })).toBeVisible();
   await expect(shadow.locator(".json-row")).toHaveCount(0);
   await expect(shadow.getByRole("button", { name: "Create in Home Assistant" })).toBeDisabled();
 });
