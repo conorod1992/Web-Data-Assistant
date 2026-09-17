@@ -1,0 +1,108 @@
+{
+  "title": "Web Data Assistant",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Add a web data source",
+        "description": "Choose what kind of source you want Web Data Assistant to guide you through.",
+        "data": {
+          "source_name": "Name",
+          "source_type": "Source type"
+        },
+        "data_description": {
+          "source_name": "A friendly name for this source, such as Carlow Weather or Electricity Prices.",
+          "source_type": "Use JSON/API for structured responses, or Web page for visible content on an HTML page."
+        }
+      },
+      "source": {
+        "title": "Connect to the source",
+        "description": "Enter the source address. Web Data Assistant will fetch it now so you can choose the data you want from the real response.",
+        "data": {
+          "url": "URL",
+          "method": "Request method",
+          "headers": "Headers",
+          "payload": "Request body",
+          "verify_ssl": "Verify SSL certificate"
+        },
+        "data_description": {
+          "headers": "Optional JSON object containing request headers, for example {\"Authorization\": \"Bearer …\"}.",
+          "payload": "Optional raw request body. Usually only needed for POST requests.",
+          "verify_ssl": "Keep enabled unless you intentionally connect to a source with a self-signed certificate."
+        }
+      },
+      "json_values": {
+        "title": "Choose JSON values",
+        "description": "Web Data Assistant found {count} selectable values in the response. Choose one or more values to create as sensors.",
+        "data": {
+          "selected_values": "Values to create"
+        }
+      },
+      "scrape_search": {
+        "title": "Find the value on the page",
+        "description": "Enter text that is currently visible on the page. Web Data Assistant will find the matching HTML element for you.",
+        "data": {
+          "search_text": "Current text or value"
+        },
+        "data_description": {
+          "search_text": "Use the value as it appears now, such as 14.6 °C, Open, or Carlow."
+        }
+      },
+      "scrape_match": {
+        "title": "Choose the correct match",
+        "description": "The text appears in {count} places. Choose the result whose surrounding content matches the value you want.",
+        "data": {
+          "match": "Matching page element"
+        }
+      },
+      "behaviour": {
+        "title": "Refresh and failure behaviour",
+        "description": "Choose how often this source updates and what its sensors should do if the website or API temporarily cannot be reached.",
+        "data": {
+          "scan_interval": "Update interval (minutes)",
+          "failure_mode": "If the source cannot be reached",
+          "max_stale_minutes": "Maximum age of retained value (minutes)"
+        },
+        "data_description": {
+          "max_stale_minutes": "Optional. When keeping the last value, mark it unavailable once the last successful update is older than this. Leave empty to keep it indefinitely."
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "The source could not be reached or returned an error.",
+      "invalid_headers": "Headers must be a valid JSON object.",
+      "no_json_values": "The response was valid JSON, but no selectable scalar values were found.",
+      "select_value": "Select at least one value.",
+      "text_not_found": "That text could not be found in the fetched page. Check the value exactly as it currently appears."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Web Data Assistant settings",
+        "description": "Adjust how often this source refreshes and how temporary source failures are handled.",
+        "data": {
+          "scan_interval": "Update interval (minutes)",
+          "failure_mode": "If the source cannot be reached",
+          "max_stale_minutes": "Maximum age of retained value (minutes)"
+        },
+        "data_description": {
+          "max_stale_minutes": "Optional. When keeping the last value, mark it unavailable once the retained value becomes older than this."
+        }
+      }
+    }
+  },
+  "selector": {
+    "source_type": {
+      "options": {
+        "json": "JSON / API",
+        "scrape": "Web page / scrape"
+      }
+    },
+    "failure_mode": {
+      "options": {
+        "unavailable": "Mark sensors unavailable",
+        "keep_last": "Keep the last known value"
+      }
+    }
+  }
+}
