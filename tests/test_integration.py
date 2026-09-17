@@ -18,8 +18,10 @@ from custom_components.web_data_assistant.client import WebDataConnectionError
 from custom_components.web_data_assistant.const import (
     CONF_ENTITIES,
     CONF_FAILURE_MODE,
+    CONF_INDEX,
     CONF_MAX_STALE_MINUTES,
     CONF_PATH,
+    CONF_SELECTOR,
     CONF_SOURCE_NAME,
     CONF_SOURCE_TYPE,
     CONF_URL,
@@ -28,7 +30,10 @@ from custom_components.web_data_assistant.const import (
     FAILURE_KEEP_LAST,
     FAILURE_UNAVAILABLE,
     SOURCE_JSON,
+    SOURCE_SCRAPE,
+    VALUE_JSON,
     VALUE_NUMBER,
+    VALUE_TEXT,
 )
 from custom_components.web_data_assistant.models import FetchResponse
 
@@ -73,12 +78,12 @@ def _response(value: float = 14.6) -> FetchResponse:
     )
 
 
-def _entity_id(hass: HomeAssistant, entry: MockConfigEntry) -> str:
-    """Return the registered temperature entity id for an entry."""
+def _entity_id(hass: HomeAssistant, entry: MockConfigEntry, key: str = "temperature") -> str:
+    """Return a registered Web Data Assistant sensor entity id."""
     entity_id = er.async_get(hass).async_get_entity_id(
         "sensor",
         DOMAIN,
-        f"{entry.entry_id}_temperature",
+        f"{entry.entry_id}_{key}",
     )
     assert entity_id is not None
     return entity_id
@@ -230,3 +235,131 @@ async def test_keep_last_becomes_unavailable_at_stale_deadline(
     state = hass.states.get(entity_id)
     assert state is not None
     assert state.state == STATE_UNAVAILABLE
+
+
+async def test_scrape_entry_publishes_selected_html_text(hass: HomeAssistant) -> None:
+    """Extract a configured HTML selector through the real HA sensor platform."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Status Page",
+        data={
+            CONF_SOURCE_NAME: "Status Page",
+            CONF_SOURCE_TYPE: SOURCE_SCRAPE,
+            CONF_URL: "https://example.test/status",
+            CONF_FAILURE_MODE: FAILURE_UNAVAILABLE,
+            CONF_ENTITIES: [
+                {
+                    "key": "service_status",
+                    "name": "Service status",
+                    CONF_SELECTOR: ".service-status",
+                    CONF_INDEX: 0,
+                    CONF_VALUE_TYPE: VALUE_TEXT,
+                }
+            ],
+        },
+    )
+    entry.add_to_hass(hass)
+    response = FetchResponse(
+        status=200,
+        content_type="text/html",
+        text='<html><body><span class="service-status">Online</span></body></html>',
+        json_data=None,
+    )
+
+    with patch(
+        "custom_components.web_data_assistant.client.WebDataClient.async_fetch",
+        new=AsyncMock(return_value=response),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+    state = hass.states.get(_entity_id(hass, entry, "service_status"))
+    assert state is not None
+    assert state.state == "Online"
+    assert state.attributes["source_available"] is True
+
+
+async def test_full_json_capture_uses_structured_attribute(hass: HomeAssistant) -> None:
+    """Publish full JSON as structured data while keeping the state compact."""
+    payload = {"current": {"temperature": 14.6}, "alerts": ["wind", "rain"]}
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="API Snapshot",
+        data={
+            CONF_SOURCE_NAME: "API Snapshot",
+            CONF_SOURCE_TYPE: SOURCE_JSON,
+            CONF_URL: "https://example.test/snapshot.json",
+            CONF_FAILURE_MODE: FAILURE_UNAVAILABLE,
+            CONF_ENTITIES: [
+                {
+                    "key": "snapshot",
+                    "name": "Snapshot",
+                    CONF_PATH: "",
+                    CONF_VALUE_TYPE: VALUE_JSON,
+                }
+            ],
+        },
+    )
+    entry.add_to_hass(hass)
+    response = FetchResponse(
+        status=200,
+        content_type="application/json",
+        text='{"current":{"temperature":14.6},"alerts":["wind","rain"]}',
+        json_data=payload,
+    )
+
+    with patch(
+        "custom_components.web_data_assistant.client.WebDataClient.async_fetch",
+        new=AsyncMock(return_value=response),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+    state = hass.states.get(_entity_id(hass, entry, "snapshot"))
+    assert state is not None
+    assert state.state == "Loaded"
+    assert state.attributes["data"] == payload
+
+
+async def test_long_text_state_is_bounded_and_preserved(hass: HomeAssistant) -> None:
+    """Keep HA state within 255 chars while retaining the complete extracted text."""
+    long_value = "x" * 320
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Long Message",
+        data={
+            CONF_SOURCE_NAME: "Long Message",
+            CONF_SOURCE_TYPE: SOURCE_JSON,
+            CONF_URL: "https://example.test/message.json",
+            CONF_FAILURE_MODE: FAILURE_UNAVAILABLE,
+            CONF_ENTITIES: [
+                {
+                    "key": "message",
+                    "name": "Message",
+                    CONF_PATH: "/message",
+                    CONF_VALUE_TYPE: VALUE_TEXT,
+                }
+            ],
+        },
+    )
+    entry.add_to_hass(hass)
+    response = FetchResponse(
+        status=200,
+        content_type="application/json",
+        text='{"message":"' + long_value + '"}',
+        json_data={"message": long_value},
+    )
+
+    with patch(
+        "custom_components.web_data_assistant.client.WebDataClient.async_fetch",
+        new=AsyncMock(return_value=response),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+    state = hass.states.get(_entity_id(hass, entry, "message"))
+    assert state is not None
+    assert len(state.state) == 255
+    assert state.state.endswith("…")
+    assert state.attributes["full_value"] == long_value
+    assert state.attributes["state_truncated"] is True
