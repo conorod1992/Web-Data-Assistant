@@ -50,7 +50,9 @@ from .const import (
     VALUE_TEXT,
 )
 from .extraction import find_html_text_matches, iter_json_candidates
+from .frontend import async_register_frontend
 from .models import HtmlMatch, JsonCandidate, WebDataEntityConfig
+from .websocket import async_register_websocket_commands
 
 
 class WebDataAssistantConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -70,6 +72,9 @@ class WebDataAssistantConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         """Choose the kind of data source to create."""
+        async_register_websocket_commands(self.hass)
+        await async_register_frontend(self.hass)
+
         if user_input is not None:
             if user_input.pop("_panel_create", False):
                 title = str(user_input[CONF_SOURCE_NAME]).strip() or "Web data source"
