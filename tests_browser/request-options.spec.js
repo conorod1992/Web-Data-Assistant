@@ -21,6 +21,8 @@ async function mountPanel(page) {
             status: 200,
             content_type: "application/json",
             truncated: false,
+            root_type: "dict",
+            root_fields: [{ name: "value", path: "/value", preview: "42", value_type: "int" }],
             values: [
               { path: "/value", display_path: "value", preview: "42", value_type: "int" },
             ],
@@ -33,7 +35,7 @@ async function mountPanel(page) {
   });
 }
 
-test("advanced request and keep-last options are preserved in the create payload", async ({ page }) => {
+test("advanced request, keep-last and long-text defaults are preserved", async ({ page }) => {
   await mountPanel(page);
   const shadow = page.locator("web-data-assistant-panel").locator(":scope");
 
@@ -48,8 +50,9 @@ test("advanced request and keep-last options are preserved in the create payload
   await shadow.getByLabel("Update interval (minutes)").fill("17");
   await shadow.getByLabel("If the source cannot be reached").selectOption("keep_last");
   await shadow.getByLabel("Maximum age of retained value (minutes)").fill("60");
+  await shadow.getByLabel("Default handling if a state exceeds 255 characters").selectOption("attribute_only");
 
-  await shadow.getByRole("button", { name: "Load source" }).click();
+  await shadow.getByRole("button", { name: "Load JSON" }).click();
   await shadow.locator(".json-row").filter({ hasText: "value" }).locator("input[type=checkbox]").check();
   await shadow.getByRole("button", { name: "Create in Home Assistant" }).click();
 
@@ -73,6 +76,7 @@ test("advanced request and keep-last options are preserved in the create payload
     scan_interval: 17,
     failure_mode: "keep_last",
     max_stale_minutes: 60,
+    long_text_policy: "attribute_only",
     url: "https://example.test/data",
     method: "POST",
     headers: { Authorization: "Bearer test-token", "X-Mode": "browser" },
