@@ -134,6 +134,7 @@ class WebDataAssistantPanel extends HTMLElement {
       .health { display:inline-flex; align-items:center; gap:6px; white-space:nowrap; font-size:12px; }
       .health-dot { width:8px; height:8px; border-radius:50%; background:var(--disabled-text-color); }
       .health.available .health-dot { background:var(--success-color,#43a047); }
+      .health.degraded .health-dot,
       .health.retained .health-dot { background:var(--warning-color,#ff9800); }
       .health.unavailable .health-dot { background:var(--error-color,#db4437); }
 
@@ -237,6 +238,7 @@ class WebDataAssistantPanel extends HTMLElement {
       const lastSuccess = source.last_successful_update ? this._formatDate(source.last_successful_update) : "Never";
       const type = source.source_type === "json" ? "JSON / API" : "Web page";
       const retaining = source.failure_mode === "keep_last" ? "Keep last value" : "Unavailable on failure";
+      const extractionErrors = Number(source.extraction_error_count || 0);
       return `
         <div class="source-card">
           <div class="source-card-head">
@@ -252,6 +254,7 @@ class WebDataAssistantPanel extends HTMLElement {
             <span>Every ${Number(source.scan_interval || 5)} min</span>
             <span>${this._html(retaining)}</span>
             <span>Last success: ${this._html(lastSuccess)}</span>
+            ${extractionErrors ? `<span>${extractionErrors} extraction issue${extractionErrors === 1 ? "" : "s"}</span>` : ""}
           </div>
           <div class="actions">
             <button class="secondary refresh-source" data-entry-id="${this._attr(source.entry_id)}" ${this._refreshingSource === source.entry_id || source.state !== "loaded" ? "disabled" : ""}>${this._refreshingSource === source.entry_id ? "Refreshing…" : "Refresh now"}</button>
@@ -264,6 +267,10 @@ class WebDataAssistantPanel extends HTMLElement {
 
   _sourceHealth(source) {
     if (source.state !== "loaded") return { className:"unavailable", label:"Not loaded" };
+    const extractionErrors = Number(source.extraction_error_count || 0);
+    if (source.source_available && extractionErrors) {
+      return { className:"degraded", label:`${extractionErrors} extraction issue${extractionErrors === 1 ? "" : "s"}` };
+    }
     if (source.source_available) return { className:"available", label:"Available" };
     if (source.failure_mode === "keep_last" && source.last_successful_update) return { className:"retained", label:"Source unavailable · retained" };
     return { className:"unavailable", label:"Source unavailable" };
@@ -306,7 +313,7 @@ class WebDataAssistantPanel extends HTMLElement {
 
     return `
       <section class="card">
-        <div class="heading"><div><h2>2. Choose JSON data</h2><p>${all.length} selectable scalar values found.</p></div></div>
+        <div class="heading"><div><h2>2. Choose JSON data</h2><p>${all.length} selectable scalar values ${this._jsonResult.truncated ? "shown" : "found"}.</p></div></div>
         <div class="tabs">
           <button class="tab ${this._jsonMode === "values" ? "active" : ""}" data-json-mode="values"><strong>Individual sensors</strong><span>Create a separate entity for each selected value.</span></button>
           <button class="tab ${this._jsonMode === "full" ? "active" : ""}" data-json-mode="full"><strong>Keep full response</strong><span>Store the whole JSON document as structured sensor data.</span></button>
@@ -314,6 +321,7 @@ class WebDataAssistantPanel extends HTMLElement {
         ${this._jsonMode === "full" ? `
           <div class="warning">The complete JSON response will be stored in an entity attribute. Large or frequently changing responses can substantially increase Recorder database usage.</div>
         ` : `
+          ${this._jsonResult.truncated ? `<div class="warning" style="margin-bottom:12px;">This response contains more than 250 scalar values. Guided selection shows the first 250 to keep the browser responsive.</div>` : ""}
           <input id="json-filter" type="search" placeholder="Filter paths or current values…" value="${this._attr(this._jsonFilter)}" style="margin-bottom:12px;">
           <div class="json-list">${rows || `<div class="hint" style="padding:16px;">No values match this filter.</div>`}</div>
           <p class="hint">${this._selectedJson.size} value${this._selectedJson.size === 1 ? "" : "s"} selected.</p>
@@ -558,7 +566,10 @@ class WebDataAssistantPanel extends HTMLElement {
       if (this._sourceType === "json") {
         this._jsonResult = await this._hass.callWS({ type:"web_data_assistant/preview_json", ...request });
         this._htmlResult = null; this._selectedJson.clear(); this._jsonOverrides.clear();
-        this._status = `Loaded ${this._jsonResult.values?.length || 0} selectable JSON values.`;
+        const count = this._jsonResult.values?.length || 0;
+        this._status = this._jsonResult.truncated
+          ? `Loaded the source. Showing the first ${count} selectable JSON values.`
+          : `Loaded ${count} selectable JSON values.`;
       } else {
         this._htmlResult = await this._hass.callWS({ type:"web_data_assistant/preview_html", ...request });
         this._jsonResult = null; this._htmlMatches = []; this._selectedExtraction = null; this._selectedPreviewId = null;
