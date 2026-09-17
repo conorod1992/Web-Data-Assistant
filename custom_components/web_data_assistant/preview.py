@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urljoin, urlsplit, urlunsplit
 
 from bs4 import BeautifulSoup, Tag
 
@@ -47,10 +47,22 @@ def _clean_text(tag: Tag) -> str:
     return " ".join(tag.get_text(" ", strip=True).split())[:240]
 
 
+def _safe_base_url(source_url: str) -> str:
+    """Return a resource-resolution base without credentials, query, or fragment."""
+    parts = urlsplit(source_url)
+    hostname = parts.hostname or ""
+    if ":" in hostname and not hostname.startswith("["):
+        hostname = f"[{hostname}]"
+    netloc = hostname
+    if parts.port is not None:
+        netloc = f"{netloc}:{parts.port}"
+    return urlunsplit((parts.scheme, netloc, parts.path or "/", "", ""))
+
+
 def _safe_resource_url(base_url: str, value: str) -> str | None:
     """Resolve a preview resource URL while excluding active schemes."""
     resolved = urljoin(base_url, value)
-    scheme = urlparse(resolved).scheme.casefold()
+    scheme = urlsplit(resolved).scheme.casefold()
     if scheme not in {"http", "https", "data"}:
         return None
     return resolved
@@ -79,6 +91,7 @@ def build_html_preview(
     """
     soup = BeautifulSoup(html, "html.parser")
     elements: dict[str, PreviewElement] = {}
+    safe_base_url = _safe_base_url(source_url)
 
     counter = 0
     for tag in list(soup.find_all(True)):
@@ -102,7 +115,12 @@ def build_html_preview(
         tag.decompose()
 
     for meta in list(soup.find_all("meta")):
-        if str(meta.get("http-equiv", "")).casefold() in {"refresh", "content-security-policy"}:
+        if str(meta.get("http-equiv", "")).casefold() in {
+            "refresh",
+            "content-security-policy",
+        }:
+            meta.decompose()
+        elif str(meta.get("name", "")).casefold() == "referrer":
             meta.decompose()
 
     for link in list(soup.find_all("link")):
@@ -130,21 +148,37 @@ def build_html_preview(
             value = tag.get(attribute)
             if not isinstance(value, str):
                 continue
-            resolved = _safe_resource_url(source_url, value)
+            resolved = _safe_resource_url(safe_base_url, value)
             if resolved is None:
                 del tag.attrs[attribute]
             else:
                 tag[attribute] = resolved
+                tag["referrerpolicy"] = "no-referrer"
+
+        if tag.name == "link":
+            href = tag.get("href")
+            if isinstance(href, str):
+                resolved = _safe_resource_url(safe_base_url, href)
+                if resolved is None:
+                    tag.decompose()
+                    continue
+                tag["href"] = resolved
+                tag["referrerpolicy"] = "no-referrer"
 
     head = _ensure_head(soup)
 
-    base = soup.new_tag("base", href=source_url)
+    base = soup.new_tag("base", href=safe_base_url)
     head.insert(0, base)
+
+    referrer = soup.new_tag("meta")
+    referrer["name"] = "referrer"
+    referrer["content"] = "no-referrer"
+    head.insert(1, referrer)
 
     csp = soup.new_tag("meta")
     csp["http-equiv"] = "Content-Security-Policy"
     csp["content"] = _PREVIEW_CSP
-    head.insert(1, csp)
+    head.insert(2, csp)
 
     overlay_style = soup.new_tag("style")
     overlay_style.string = """
