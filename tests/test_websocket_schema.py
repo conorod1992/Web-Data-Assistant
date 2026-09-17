@@ -187,3 +187,47 @@ async def test_create_source_rejects_zero_stale_timeout(
     assert message["error"]["code"] == "invalid_format"
     fetch.assert_not_awaited()
     assert hass.config_entries.async_entries(DOMAIN) == []
+
+
+async def test_create_source_rejects_stale_timeout_above_maximum(
+    hass: HomeAssistant,
+    hass_ws_client,
+) -> None:
+    """Reject a retained-value stale timeout above one year before any fetch."""
+    flow = await hass.config_entries.flow.async_init(
+        DOMAIN,
+        context={"source": SOURCE_USER},
+    )
+    assert flow["step_id"] == "user"
+
+    fetch = AsyncMock()
+    client = await hass_ws_client(hass)
+    with patch(
+        "custom_components.web_data_assistant.client.WebDataClient.async_fetch",
+        new=fetch,
+    ):
+        await client.send_json(
+            {
+                "id": 1,
+                "type": f"{DOMAIN}/create_source",
+                CONF_SOURCE_NAME: "Excessive Stale Timeout",
+                CONF_SOURCE_TYPE: SOURCE_JSON,
+                CONF_URL: "https://example.test/data.json",
+                CONF_FAILURE_MODE: FAILURE_KEEP_LAST,
+                CONF_MAX_STALE_MINUTES: 525601,
+                CONF_ENTITIES: [
+                    {
+                        "key": "temperature",
+                        "name": "Temperature",
+                        CONF_PATH: "/temperature",
+                        CONF_VALUE_TYPE: VALUE_NUMBER,
+                    }
+                ],
+            }
+        )
+        message = await client.receive_json()
+
+    assert message["success"] is False
+    assert message["error"]["code"] == "invalid_format"
+    fetch.assert_not_awaited()
+    assert hass.config_entries.async_entries(DOMAIN) == []
