@@ -4,11 +4,19 @@ from __future__ import annotations
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.typing import ConfigType
 
 from .const import PLATFORMS
 from .coordinator import WebDataCoordinator
+from .websocket import async_register_websocket_commands
 
 type WebDataAssistantConfigEntry = ConfigEntry[WebDataCoordinator]
+
+
+async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
+    """Set up integration-wide Web Data Assistant functionality."""
+    async_register_websocket_commands(hass)
+    return True
 
 
 async def async_setup_entry(
