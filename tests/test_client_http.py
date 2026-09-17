@@ -34,3 +34,36 @@ async def test_client_follows_http_redirects(
     assert response.status == 200
     assert response.json_data == {"value": 42}
     assert "application/json" in response.content_type
+
+
+async def test_client_reads_complete_chunked_response(
+    hass: HomeAssistant,
+    aiohttp_server,
+    socket_enabled,
+) -> None:
+    """Assemble all chunks before decoding and parsing a response."""
+    app = web.Application()
+
+    async def chunked(request: web.Request) -> web.StreamResponse:
+        response = web.StreamResponse(
+            status=200,
+            headers={"Content-Type": "application/json"},
+        )
+        await response.prepare(request)
+        await response.write(b'{"temperature":')
+        await response.write(b'14.6,"condition":')
+        await response.write(b'"Cloudy"}')
+        await response.write_eof()
+        return response
+
+    app.router.add_get("/chunked", chunked)
+    server = await aiohttp_server(app)
+
+    response = await WebDataClient(hass).async_fetch(
+        str(server.make_url("/chunked")),
+        parse_json=True,
+    )
+
+    assert response.status == 200
+    assert response.json_data == {"temperature": 14.6, "condition": "Cloudy"}
+    assert response.text == '{"temperature":14.6,"condition":"Cloudy"}'
