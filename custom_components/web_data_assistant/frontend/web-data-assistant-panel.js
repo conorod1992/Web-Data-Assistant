@@ -272,7 +272,18 @@ class WebDataAssistantPanel extends HTMLElement {
       return { className:"degraded", label:`${extractionErrors} extraction issue${extractionErrors === 1 ? "" : "s"}` };
     }
     if (source.source_available) return { className:"available", label:"Available" };
-    if (source.failure_mode === "keep_last" && source.last_successful_update) return { className:"retained", label:"Source unavailable · retained" };
+    if (source.failure_mode === "keep_last" && source.last_successful_update) {
+      const maxStaleMinutes = Number(source.max_stale_minutes || 0);
+      const lastSuccessMs = new Date(source.last_successful_update).getTime();
+      if (
+        Number.isFinite(maxStaleMinutes) && maxStaleMinutes > 0 &&
+        Number.isFinite(lastSuccessMs) &&
+        Date.now() >= lastSuccessMs + maxStaleMinutes * 60_000
+      ) {
+        return { className:"unavailable", label:"Source unavailable" };
+      }
+      return { className:"retained", label:"Source unavailable · retained" };
+    }
     return { className:"unavailable", label:"Source unavailable" };
   }
 
