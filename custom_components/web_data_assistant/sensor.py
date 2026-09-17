@@ -20,16 +20,31 @@ from homeassistant.util import dt as dt_util
 from . import WebDataAssistantConfigEntry
 from .const import (
     CONF_FAILURE_MODE,
+    CONF_LONG_TEXT_POLICY,
     CONF_MAX_STALE_MINUTES,
+    DEFAULT_LONG_TEXT_POLICY,
     DOMAIN,
     FAILURE_KEEP_LAST,
     FAILURE_UNAVAILABLE,
+    LONG_TEXT_ATTRIBUTE_ONLY,
+    LONG_TEXT_TRUNCATE,
+    LONG_TEXT_UNAVAILABLE,
     VALUE_BOOLEAN,
     VALUE_JSON,
     VALUE_NUMBER,
 )
 from .coordinator import WebDataCoordinator
 from .models import WebDataEntityConfig
+
+_RESERVED_ATTRIBUTES = {
+    "source_available",
+    "last_successful_update",
+    "source_error",
+    "extraction_error",
+    "full_value",
+    "state_truncated",
+    "data",
+}
 
 
 def _coerce_value(value: Any, value_type: str) -> Any:
@@ -68,7 +83,7 @@ def _coerce_value(value: Any, value_type: str) -> Any:
     return value
 
 
-def _bounded_state(value: Any) -> Any:
+def _truncate_state(value: Any) -> Any:
     """Keep text states within Home Assistant's 255-character state limit."""
     if not isinstance(value, str) or len(value) <= MAX_LENGTH_STATE_STATE:
         return value
@@ -93,7 +108,7 @@ class WebDataSensor(
     RestoreEntity,
     SensorEntity,
 ):
-    """One value extracted from a Web Data Assistant source."""
+    """One value or aggregate JSON object extracted from a web source."""
 
     _attr_has_entity_name = True
 
@@ -108,6 +123,7 @@ class WebDataSensor(
         self._entry = entry
         self._config = config
         self._restored_value: Any | None = None
+        self._restored_attributes: dict[str, Any] = {}
         self._has_restored_value = False
         self._restored_last_successful_update: datetime | None = None
         self._cancel_stale_timer: Callable[[], None] | None = None
@@ -148,6 +164,12 @@ class WebDataSensor(
             return self._restored_value
         return None
 
+    def _effective_json_attributes(self) -> dict[str, Any]:
+        """Return live aggregate JSON attributes or restored startup attributes."""
+        if self._live_value_available():
+            return self.coordinator.attributes_for(self._config.key)
+        return self._restored_attributes
+
     def _effective_last_successful_update(self) -> datetime | None:
         """Return the timestamp associated with the retained value."""
         if self._live_value_available():
@@ -161,6 +183,13 @@ class WebDataSensor(
             self._entry.data.get(CONF_FAILURE_MODE, FAILURE_UNAVAILABLE),
         )
 
+    def _long_text_policy(self) -> str:
+        """Return the effective long-text policy for this entity."""
+        return self._config.long_text_policy or self._entry.options.get(
+            CONF_LONG_TEXT_POLICY,
+            self._entry.data.get(CONF_LONG_TEXT_POLICY, DEFAULT_LONG_TEXT_POLICY),
+        )
+
     def _max_stale_minutes(self) -> int | None:
         """Return the configured retained-value age limit, if any."""
         value = self._entry.options.get(
@@ -168,6 +197,15 @@ class WebDataSensor(
             self._entry.data.get(CONF_MAX_STALE_MINUTES),
         )
         return int(value) if value else None
+
+    def _coerced_value(self) -> Any:
+        """Return the entity's coerced state value before long-text handling."""
+        return _coerce_value(self._effective_raw_value(), self._config.value_type)
+
+    def _is_overlong_text(self) -> bool:
+        """Return whether the current state value exceeds HA's state limit."""
+        value = self._coerced_value()
+        return isinstance(value, str) and len(value) > MAX_LENGTH_STATE_STATE
 
     @callback
     def _cancel_stale_expiry(self) -> None:
@@ -216,7 +254,7 @@ class WebDataSensor(
 
     @override
     async def async_added_to_hass(self) -> None:
-        """Restore a retained value if startup could not reach the source."""
+        """Restore retained state and aggregate attributes after an offline restart."""
         await super().async_added_to_hass()
         self.async_on_remove(self._cancel_stale_expiry)
 
@@ -240,6 +278,13 @@ class WebDataSensor(
             self._restored_value = last_state.state
         self._has_restored_value = True
 
+        if self._config.attributes:
+            self._restored_attributes = {
+                name: last_state.attributes[name]
+                for name in self._config.attributes
+                if name in last_state.attributes and name not in _RESERVED_ATTRIBUTES
+            }
+
         restored_timestamp = last_state.attributes.get("last_successful_update")
         if isinstance(restored_timestamp, str):
             self._restored_last_successful_update = dt_util.parse_datetime(
@@ -251,17 +296,24 @@ class WebDataSensor(
 
     @property
     def native_value(self) -> Any:
-        """Return the latest extracted or restored state."""
-        value = _coerce_value(
-            self._effective_raw_value(),
-            self._config.value_type,
-        )
-        return _bounded_state(value)
+        """Return the latest state while applying the configured long-text policy."""
+        value = self._coerced_value()
+        if not isinstance(value, str) or len(value) <= MAX_LENGTH_STATE_STATE:
+            return value
+
+        policy = self._long_text_policy()
+        if policy == LONG_TEXT_ATTRIBUTE_ONLY:
+            return "Loaded"
+        if policy == LONG_TEXT_UNAVAILABLE:
+            return value[:MAX_LENGTH_STATE_STATE]
+        return _truncate_state(value)
 
     @property
     def available(self) -> bool:
-        """Apply the configured source-failure behaviour."""
+        """Apply extraction, long-text and source-failure behaviour."""
         if self.coordinator.extraction_error_for(self._config.key):
+            return False
+        if self._is_overlong_text() and self._long_text_policy() == LONG_TEXT_UNAVAILABLE:
             return False
 
         if self.coordinator.last_update_success:
@@ -285,16 +337,16 @@ class WebDataSensor(
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        """Expose source health and values that do not fit safely in state."""
-        attributes: dict[str, Any] = {
-            "source_available": self.coordinator.last_update_success,
-        }
+        """Expose selected JSON attributes, source health and full long text."""
+        attributes: dict[str, Any] = dict(self._effective_json_attributes())
+        attributes["source_available"] = self.coordinator.last_update_success
+
         raw_value = self._effective_raw_value()
         if self._config.value_type == VALUE_JSON:
             attributes["data"] = raw_value
-        elif isinstance(raw_value, str) and len(raw_value) > MAX_LENGTH_STATE_STATE:
+        elif self._is_overlong_text():
             attributes["full_value"] = raw_value
-            attributes["state_truncated"] = True
+            attributes["state_truncated"] = self._long_text_policy() == LONG_TEXT_TRUNCATE
 
         last_successful_update = self._effective_last_successful_update()
         if last_successful_update is not None:
