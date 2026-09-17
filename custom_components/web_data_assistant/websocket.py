@@ -27,6 +27,7 @@ from .const import (
     CONF_SOURCE_TYPE,
     CONF_URL,
     CONF_VERIFY_SSL,
+    DATA_WEBSOCKET_REGISTERED,
     DEFAULT_FAILURE_MODE,
     DEFAULT_SCAN_INTERVAL_MINUTES,
     DEFAULT_VERIFY_SSL,
@@ -291,7 +292,12 @@ async def websocket_create_source(
 
 def async_register_websocket_commands(hass: HomeAssistant) -> None:
     """Register frontend preview commands once for the integration."""
+    domain_data = hass.data.setdefault(DOMAIN, {})
+    if domain_data.get(DATA_WEBSOCKET_REGISTERED):
+        return
+
     websocket_api.async_register_command(hass, websocket_preview_json)
     websocket_api.async_register_command(hass, websocket_preview_html)
     websocket_api.async_register_command(hass, websocket_search_html)
     websocket_api.async_register_command(hass, websocket_create_source)
+    domain_data[DATA_WEBSOCKET_REGISTERED] = True
