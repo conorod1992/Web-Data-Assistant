@@ -26,6 +26,11 @@ class WebDataResponseError(WebDataError):
     """Raised when a source returns an unusable response."""
 
 
+def _reject_non_standard_json_constant(value: str) -> None:
+    """Reject NaN and Infinity constants that are not valid JSON."""
+    raise ValueError(f"Invalid JSON constant: {value}")
+
+
 class WebDataClient:
     """Small Home Assistant-aware HTTP client shared by setup and coordinators."""
 
@@ -102,7 +107,10 @@ class WebDataClient:
         json_data: Any | None = None
         if parse_json:
             try:
-                json_data = json.loads(text)
+                json_data = json.loads(
+                    text,
+                    parse_constant=_reject_non_standard_json_constant,
+                )
             except (TypeError, ValueError) as err:
                 raise WebDataResponseError(
                     "The source responded successfully but did not return valid JSON"
