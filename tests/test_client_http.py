@@ -311,3 +311,27 @@ async def test_client_sanitizes_refused_connection_error(
     assert "/private" not in message
     assert "The source could not be reached" in message
     assert "ClientConnectorError" in message
+
+
+async def test_client_honors_declared_response_charset(
+    hass: HomeAssistant,
+    aiohttp_server,
+    socket_enabled,
+) -> None:
+    """Decode a response using a valid non-UTF-8 charset declared by the server."""
+    app = web.Application()
+
+    async def latin1(_request: web.Request) -> web.Response:
+        return web.Response(
+            body="Crème brûlée".encode("iso-8859-1"),
+            headers={"Content-Type": "text/plain; charset=iso-8859-1"},
+        )
+
+    app.router.add_get("/latin1", latin1)
+    server = await aiohttp_server(app)
+
+    response = await WebDataClient(hass).async_fetch(str(server.make_url("/latin1")))
+
+    assert response.status == 200
+    assert response.text == "Crème brûlée"
+    assert "charset=iso-8859-1" in response.content_type
