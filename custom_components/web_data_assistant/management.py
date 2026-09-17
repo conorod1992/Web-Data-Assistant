@@ -14,6 +14,7 @@ from homeassistant.helpers import entity_registry as er
 
 from .client import WebDataClient, WebDataError
 from .const import (
+    CONF_ATTRIBUTES,
     CONF_ENTITIES,
     CONF_FAILURE_MODE,
     CONF_HEADERS,
@@ -44,6 +45,7 @@ from .websocket import (
     _COMMON_FIELDS,
     _ENTITY_SCHEMA,
     _fetch_kwargs,
+    _non_empty_text,
     _validate_entity_definitions,
 )
 
@@ -160,7 +162,7 @@ async def _validate_update(hass: HomeAssistant, msg: dict[str, Any]) -> None:
         for entity in entities:
             if CONF_PATH in entity:
                 resolve_json_pointer(response.json_data, str(entity[CONF_PATH]))
-            for path in entity.get("attributes", {}).values():
+            for path in entity.get(CONF_ATTRIBUTES, {}).values():
                 resolve_json_pointer(response.json_data, str(path))
         return
 
@@ -244,7 +246,9 @@ async def websocket_get_source(
     {
         vol.Required("type"): f"{DOMAIN}/update_source",
         vol.Required("entry_id"): str,
-        vol.Required(CONF_SOURCE_NAME): vol.All(str, vol.Length(min=1, max=100)),
+        vol.Required(CONF_SOURCE_NAME): vol.All(
+            str, _non_empty_text, vol.Length(max=100)
+        ),
         vol.Required(CONF_SOURCE_TYPE): vol.In(["json", "scrape"]),
         vol.Required(CONF_ENTITIES): vol.All([_ENTITY_SCHEMA], vol.Length(min=1, max=100)),
         vol.Optional(CONF_SCAN_INTERVAL, default=DEFAULT_SCAN_INTERVAL_MINUTES): vol.All(
@@ -283,22 +287,39 @@ async def websocket_update_source(
 
     old_keys = {str(entity["key"]) for entity in entry.data.get(CONF_ENTITIES, [])}
     new_keys = {str(entity["key"]) for entity in msg[CONF_ENTITIES]}
-    options = dict(entry.options)
+    old_title = entry.title
+    old_data = dict(entry.data)
+    old_options = dict(entry.options)
+
+    new_options = dict(entry.options)
     for key in (
         CONF_SCAN_INTERVAL,
         CONF_FAILURE_MODE,
         CONF_MAX_STALE_MINUTES,
         CONF_LONG_TEXT_POLICY,
     ):
-        options.pop(key, None)
+        new_options.pop(key, None)
 
     hass.config_entries.async_update_entry(
         entry,
-        title=msg[CONF_SOURCE_NAME].strip(),
+        title=msg[CONF_SOURCE_NAME],
         data=_updated_entry_data(msg),
-        options=options,
+        options=new_options,
     )
-    await hass.config_entries.async_reload(entry.entry_id)
+    if not await hass.config_entries.async_reload(entry.entry_id):
+        hass.config_entries.async_update_entry(
+            entry,
+            title=old_title,
+            data=old_data,
+            options=old_options,
+        )
+        await hass.config_entries.async_reload(entry.entry_id)
+        connection.send_error(
+            msg["id"],
+            "reload_failed",
+            "Home Assistant could not reload the edited source; previous settings were restored",
+        )
+        return
 
     registry = er.async_get(hass)
     for key in old_keys - new_keys:
