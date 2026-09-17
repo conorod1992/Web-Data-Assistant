@@ -1,0 +1,36 @@
+"""Real HTTP transport tests for Web Data Assistant."""
+
+from __future__ import annotations
+
+from aiohttp import web
+from homeassistant.core import HomeAssistant
+
+from custom_components.web_data_assistant.client import WebDataClient
+
+
+async def test_client_follows_http_redirects(
+    hass: HomeAssistant,
+    aiohttp_server,
+    socket_enabled,
+) -> None:
+    """Follow a normal HTTP redirect and parse the final JSON response."""
+    app = web.Application()
+
+    async def redirect(_request: web.Request) -> web.StreamResponse:
+        raise web.HTTPFound("/final")
+
+    async def final(_request: web.Request) -> web.Response:
+        return web.json_response({"value": 42})
+
+    app.router.add_get("/start", redirect)
+    app.router.add_get("/final", final)
+    server = await aiohttp_server(app)
+
+    response = await WebDataClient(hass).async_fetch(
+        str(server.make_url("/start")),
+        parse_json=True,
+    )
+
+    assert response.status == 200
+    assert response.json_data == {"value": 42}
+    assert "application/json" in response.content_type
