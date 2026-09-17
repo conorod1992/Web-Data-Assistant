@@ -86,8 +86,8 @@ _COMMON_FIELDS: dict[Any, Any] = {
 
 _ENTITY_SCHEMA = vol.Schema(
     {
-        vol.Required("key"): vol.All(str, vol.Length(min=1, max=150)),
-        vol.Required("name"): vol.All(str, vol.Length(min=1, max=150)),
+        vol.Required("key"): vol.All(str, _non_empty_text, vol.Length(max=150)),
+        vol.Required("name"): vol.All(str, _non_empty_text, vol.Length(max=150)),
         vol.Required(CONF_VALUE_TYPE, default=VALUE_TEXT): vol.In(
             [VALUE_TEXT, VALUE_NUMBER, VALUE_BOOLEAN, VALUE_JSON]
         ),
@@ -111,6 +111,27 @@ def _fetch_kwargs(msg: dict[str, Any]) -> dict[str, Any]:
         "payload": msg.get(CONF_PAYLOAD),
         "verify_ssl": msg.get(CONF_VERIFY_SSL, DEFAULT_VERIFY_SSL),
     }
+
+
+def _validate_entity_definitions(source_type: str, entities: list[dict[str, Any]]) -> None:
+    """Validate relationships that cannot be expressed per entity in the schema."""
+    keys = [str(entity["key"]) for entity in entities]
+    if len(set(keys)) != len(keys):
+        raise ValueError("Each sensor in a source must have a unique key")
+
+    for entity in entities:
+        if source_type == SOURCE_JSON:
+            if CONF_PATH not in entity:
+                raise ValueError("A selected JSON value is missing its path")
+            if CONF_SELECTOR in entity:
+                raise ValueError("JSON sensors cannot contain an HTML selector")
+        else:
+            if not entity.get(CONF_SELECTOR):
+                raise ValueError("A selected page value is missing its selector")
+            if CONF_PATH in entity:
+                raise ValueError("Web page sensors cannot contain a JSON path")
+            if entity.get(CONF_VALUE_TYPE) == VALUE_JSON:
+                raise ValueError("Web page sensors cannot use the full JSON value type")
 
 
 @websocket_api.websocket_command(
@@ -284,6 +305,12 @@ async def websocket_create_source(
     source_type = msg[CONF_SOURCE_TYPE]
     entities = msg[CONF_ENTITIES]
 
+    try:
+        _validate_entity_definitions(source_type, entities)
+    except ValueError as err:
+        connection.send_error(msg["id"], "invalid_entities", str(err))
+        return
+
     client = WebDataClient(hass)
     try:
         response = await client.async_fetch(
@@ -293,17 +320,11 @@ async def websocket_create_source(
         )
         for entity in entities:
             if source_type == SOURCE_JSON:
-                path = entity.get(CONF_PATH)
-                if path is None:
-                    raise ValueError("A selected JSON value is missing its path")
-                resolve_json_pointer(response.json_data, str(path))
+                resolve_json_pointer(response.json_data, str(entity[CONF_PATH]))
             else:
-                selector = entity.get(CONF_SELECTOR)
-                if not selector:
-                    raise ValueError("A selected page value is missing its selector")
                 extract_html_value(
                     response.text,
-                    str(selector),
+                    str(entity[CONF_SELECTOR]),
                     int(entity.get(CONF_INDEX, 0)),
                     entity.get(CONF_ATTRIBUTE),
                 )
