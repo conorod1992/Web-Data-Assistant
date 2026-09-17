@@ -90,6 +90,7 @@ jobs:
           tests/test_runtime_semantics.py
           tests/test_client_http.py
           tests/test_client_http_content_type.py
+          tests/test_websocket_validation.py
           --maxfail=1
 
   hassfest:
