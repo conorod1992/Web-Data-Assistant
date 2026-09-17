@@ -71,11 +71,16 @@ class WebDataClient:
                             "The source response is too large to process safely"
                         )
 
-                    body = await response.content.read(MAX_RESPONSE_BYTES + 1)
-                    if len(body) > MAX_RESPONSE_BYTES:
-                        raise WebDataResponseError(
-                            "The source response is too large to process safely"
-                        )
+                    chunks: list[bytes] = []
+                    received = 0
+                    async for chunk in response.content.iter_chunked(64 * 1024):
+                        received += len(chunk)
+                        if received > MAX_RESPONSE_BYTES:
+                            raise WebDataResponseError(
+                                "The source response is too large to process safely"
+                            )
+                        chunks.append(chunk)
+                    body = b"".join(chunks)
 
                     charset = response.charset or "utf-8"
                     try:
