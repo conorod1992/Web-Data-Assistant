@@ -1,0 +1,158 @@
+"""Real Home Assistant runtime semantics tests for Web Data Assistant."""
+
+from __future__ import annotations
+
+from unittest.mock import AsyncMock, patch
+
+from homeassistant.const import STATE_UNAVAILABLE
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers import device_registry as dr, entity_registry as er
+from pytest_homeassistant_custom_component.common import MockConfigEntry
+
+from custom_components.web_data_assistant.const import (
+    CONF_ENTITIES,
+    CONF_FAILURE_MODE,
+    CONF_PATH,
+    CONF_SOURCE_NAME,
+    CONF_SOURCE_TYPE,
+    CONF_URL,
+    CONF_VALUE_TYPE,
+    DOMAIN,
+    FAILURE_KEEP_LAST,
+    FAILURE_UNAVAILABLE,
+    SOURCE_JSON,
+    VALUE_NUMBER,
+)
+from custom_components.web_data_assistant.models import FetchResponse
+
+
+def _response(data: dict) -> FetchResponse:
+    """Return a successful JSON response."""
+    return FetchResponse(
+        status=200,
+        content_type="application/json",
+        text="{}",
+        json_data=data,
+    )
+
+
+async def test_extraction_failure_is_not_source_failure_and_recovers(
+    hass: HomeAssistant,
+) -> None:
+    """Keep source health successful when only a selected JSON path is missing."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Weather API",
+        data={
+            CONF_SOURCE_NAME: "Weather API",
+            CONF_SOURCE_TYPE: SOURCE_JSON,
+            CONF_URL: "https://example.test/weather.json",
+            CONF_FAILURE_MODE: FAILURE_KEEP_LAST,
+            CONF_ENTITIES: [
+                {
+                    "key": "temperature",
+                    "name": "Temperature",
+                    CONF_PATH: "/current/temperature",
+                    CONF_VALUE_TYPE: VALUE_NUMBER,
+                }
+            ],
+        },
+    )
+    entry.add_to_hass(hass)
+    fetch = AsyncMock(return_value=_response({"current": {"condition": "Cloudy"}}))
+
+    with patch(
+        "custom_components.web_data_assistant.client.WebDataClient.async_fetch",
+        new=fetch,
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        entity_id = er.async_get(hass).async_get_entity_id(
+            "sensor", DOMAIN, f"{entry.entry_id}_temperature"
+        )
+        assert entity_id is not None
+        state = hass.states.get(entity_id)
+        assert state is not None
+        assert state.state == STATE_UNAVAILABLE
+        assert entry.runtime_data.last_update_success is True
+        assert entry.runtime_data.last_source_error is None
+        assert entry.runtime_data.extraction_error_for("temperature") is not None
+
+        fetch.return_value = _response({"current": {"temperature": 15.2}})
+        await entry.runtime_data.async_request_refresh()
+        await hass.async_block_till_done()
+
+    recovered = hass.states.get(entity_id)
+    assert recovered is not None
+    assert recovered.state == "15.2"
+    assert recovered.attributes["source_available"] is True
+    assert entry.runtime_data.extraction_error_for("temperature") is None
+
+
+async def test_multiple_json_sensors_share_fetch_and_service_device(
+    hass: HomeAssistant,
+) -> None:
+    """Use one coordinator request and one HA service device for one source."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Weather API",
+        data={
+            CONF_SOURCE_NAME: "Weather API",
+            CONF_SOURCE_TYPE: SOURCE_JSON,
+            CONF_URL: "https://example.test/weather.json",
+            CONF_FAILURE_MODE: FAILURE_UNAVAILABLE,
+            CONF_ENTITIES: [
+                {
+                    "key": "temperature",
+                    "name": "Temperature",
+                    CONF_PATH: "/current/temperature",
+                    CONF_VALUE_TYPE: VALUE_NUMBER,
+                },
+                {
+                    "key": "humidity",
+                    "name": "Humidity",
+                    CONF_PATH: "/current/humidity",
+                    CONF_VALUE_TYPE: VALUE_NUMBER,
+                },
+            ],
+        },
+    )
+    entry.add_to_hass(hass)
+    fetch = AsyncMock(
+        return_value=_response({"current": {"temperature": 14.6, "humidity": 82}})
+    )
+
+    with patch(
+        "custom_components.web_data_assistant.client.WebDataClient.async_fetch",
+        new=fetch,
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+    fetch.assert_awaited_once()
+
+    entity_registry = er.async_get(hass)
+    temperature_id = entity_registry.async_get_entity_id(
+        "sensor", DOMAIN, f"{entry.entry_id}_temperature"
+    )
+    humidity_id = entity_registry.async_get_entity_id(
+        "sensor", DOMAIN, f"{entry.entry_id}_humidity"
+    )
+    assert temperature_id is not None
+    assert humidity_id is not None
+    assert hass.states[temperature_id].state == "14.6"
+    assert hass.states[humidity_id].state == "82"
+
+    temperature_entry = entity_registry.async_get(temperature_id)
+    humidity_entry = entity_registry.async_get(humidity_id)
+    assert temperature_entry is not None
+    assert humidity_entry is not None
+    assert temperature_entry.device_id is not None
+    assert temperature_entry.device_id == humidity_entry.device_id
+
+    device = dr.async_get(hass).async_get(temperature_entry.device_id)
+    assert device is not None
+    assert device.entry_type is dr.DeviceEntryType.SERVICE
+    assert device.name == "Weather API"
+    assert (DOMAIN, entry.entry_id) in device.identifiers
