@@ -8,8 +8,8 @@ from typing import Any
 import voluptuous as vol
 
 from homeassistant import config_entries
+from homeassistant.config_entries import ConfigFlowResult
 from homeassistant.core import callback
-from homeassistant.data_entry_flow import FlowResult
 from homeassistant.helpers.selector import (
     SelectOptionDict,
     SelectSelector,
@@ -45,6 +45,7 @@ from .const import (
     SOURCE_JSON,
     SOURCE_SCRAPE,
     VALUE_BOOLEAN,
+    VALUE_JSON,
     VALUE_NUMBER,
     VALUE_TEXT,
 )
@@ -65,7 +66,9 @@ class WebDataAssistantConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._html_matches: list[HtmlMatch] = []
         self._search_text: str = ""
 
-    async def async_step_user(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+    async def async_step_user(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
         """Choose the kind of data source to create."""
         if user_input is not None:
             self._source.update(user_input)
@@ -86,7 +89,9 @@ class WebDataAssistantConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             ),
         )
 
-    async def async_step_source(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+    async def async_step_source(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
         """Collect connection details and test the source."""
         errors: dict[str, str] = {}
         if user_input is not None:
@@ -119,7 +124,7 @@ class WebDataAssistantConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         if not self._json_candidates:
                             errors["base"] = "no_json_values"
                         else:
-                            return await self.async_step_json_values()
+                            return await self.async_step_json_mode()
                     else:
                         return await self.async_step_scrape_search()
 
@@ -145,9 +150,18 @@ class WebDataAssistantConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             errors=errors,
         )
 
+    async def async_step_json_mode(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Choose how a JSON response should be represented."""
+        return self.async_show_menu(
+            step_id="json_mode",
+            menu_options=["json_values", "json_full"],
+        )
+
     async def async_step_json_values(
         self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
+    ) -> ConfigFlowResult:
         """Let the user select scalar values discovered in a JSON response."""
         errors: dict[str, str] = {}
         candidate_map = {candidate.path: candidate for candidate in self._json_candidates}
@@ -196,9 +210,29 @@ class WebDataAssistantConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             description_placeholders={"count": str(len(options))},
         )
 
+    async def async_step_json_full(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Create one sensor retaining the complete JSON document as attributes."""
+        if user_input is not None and user_input.get("confirm"):
+            self._source[CONF_ENTITIES] = [
+                WebDataEntityConfig(
+                    key="full_response",
+                    name=self._source[CONF_SOURCE_NAME],
+                    path="",
+                    value_type=VALUE_JSON,
+                ).as_dict()
+            ]
+            return await self.async_step_behaviour()
+
+        return self.async_show_form(
+            step_id="json_full",
+            data_schema=vol.Schema({vol.Required("confirm", default=False): bool}),
+        )
+
     async def async_step_scrape_search(
         self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
+    ) -> ConfigFlowResult:
         """Find HTML elements using text the user can currently see."""
         errors: dict[str, str] = {}
         if user_input is not None:
@@ -223,7 +257,7 @@ class WebDataAssistantConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     async def async_step_scrape_match(
         self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
+    ) -> ConfigFlowResult:
         """Disambiguate multiple HTML text matches."""
         if user_input is not None:
             index = int(user_input["match"])
@@ -249,7 +283,7 @@ class WebDataAssistantConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             description_placeholders={"count": str(len(options))},
         )
 
-    async def _async_use_html_match(self, match: HtmlMatch) -> FlowResult:
+    async def _async_use_html_match(self, match: HtmlMatch) -> ConfigFlowResult:
         """Store a selected HTML match and continue the flow."""
         self._source[CONF_ENTITIES] = [
             WebDataEntityConfig(
@@ -264,7 +298,7 @@ class WebDataAssistantConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     async def async_step_behaviour(
         self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
+    ) -> ConfigFlowResult:
         """Configure refresh and failure behaviour."""
         if user_input is not None:
             self._source.update(user_input)
@@ -353,7 +387,7 @@ class WebDataAssistantOptionsFlow(config_entries.OptionsFlowWithReload):
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
+    ) -> ConfigFlowResult:
         """Manage Web Data Assistant options."""
         if user_input is not None:
             if not user_input.get(CONF_MAX_STALE_MINUTES):
