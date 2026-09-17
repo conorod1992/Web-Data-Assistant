@@ -141,3 +141,36 @@ async def test_client_rejects_oversized_content_length(
         match="response is too large to process safely",
     ):
         await WebDataClient(hass).async_fetch(str(server.make_url("/too-large")))
+
+
+async def test_client_rejects_oversized_chunked_response(
+    hass: HomeAssistant,
+    aiohttp_server,
+    socket_enabled,
+) -> None:
+    """Enforce the safety cap even when the server omits Content-Length."""
+    app = web.Application()
+    chunk = b"x" * (64 * 1024)
+    chunk_count = (MAX_RESPONSE_BYTES // len(chunk)) + 2
+
+    async def too_large_chunked(request: web.Request) -> web.StreamResponse:
+        response = web.StreamResponse(status=200)
+        await response.prepare(request)
+        try:
+            for _ in range(chunk_count):
+                await response.write(chunk)
+            await response.write_eof()
+        except ConnectionResetError:
+            pass
+        return response
+
+    app.router.add_get("/too-large-chunked", too_large_chunked)
+    server = await aiohttp_server(app)
+
+    with pytest.raises(
+        WebDataResponseError,
+        match="response is too large to process safely",
+    ):
+        await WebDataClient(hass).async_fetch(
+            str(server.make_url("/too-large-chunked"))
+        )
