@@ -7,6 +7,6 @@
   "integration_type": "service",
   "iot_class": "cloud_polling",
   "issue_tracker": "https://github.com/conorod1992/Web-Data-Assistant/issues",
-  "requirements": [],
+  "requirements": ["beautifulsoup4==4.13.3"],
   "version": "0.1.0"
 }
