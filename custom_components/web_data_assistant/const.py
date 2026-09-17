@@ -40,6 +40,7 @@ FAILURE_KEEP_LAST = "keep_last"
 VALUE_TEXT = "text"
 VALUE_NUMBER = "number"
 VALUE_BOOLEAN = "boolean"
+VALUE_JSON = "json"
 
 DEFAULT_SCAN_INTERVAL = timedelta(minutes=5)
 DEFAULT_SCAN_INTERVAL_MINUTES = 5
