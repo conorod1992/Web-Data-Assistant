@@ -24,10 +24,10 @@ test("source-list failure does not block creating a new source", async ({ page }
   const shadow = page.locator("web-data-assistant-panel").locator(":scope");
   await expect(shadow.locator(".error")).toContainText("Configured sources could not be loaded from Home Assistant");
 
-  await expect(shadow.getByRole("heading", { name: "Create a source", level: 2 })).toBeVisible();
+  await expect(shadow.getByRole("heading", { name: "1. Source", level: 2 })).toBeVisible();
   await expect(shadow.getByLabel("Source name")).toBeEnabled();
   await expect(shadow.getByLabel("URL")).toBeEnabled();
-  await expect(shadow.getByRole("button", { name: "Load source" })).toBeEnabled();
+  await expect(shadow.getByRole("button", { name: "Load JSON" })).toBeEnabled();
 
   await shadow.getByLabel("Source name").fill("Still Usable");
   await shadow.getByLabel("URL").fill("https://example.test/data");
