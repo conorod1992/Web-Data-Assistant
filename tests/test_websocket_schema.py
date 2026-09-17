@@ -10,6 +10,7 @@ from homeassistant.core import HomeAssistant
 from custom_components.web_data_assistant.const import (
     CONF_ENTITIES,
     CONF_FAILURE_MODE,
+    CONF_MAX_STALE_MINUTES,
     CONF_PATH,
     CONF_SCAN_INTERVAL,
     CONF_SOURCE_NAME,
@@ -17,6 +18,7 @@ from custom_components.web_data_assistant.const import (
     CONF_URL,
     CONF_VALUE_TYPE,
     DOMAIN,
+    FAILURE_KEEP_LAST,
     FAILURE_UNAVAILABLE,
     SOURCE_JSON,
     VALUE_NUMBER,
@@ -125,6 +127,50 @@ async def test_create_source_rejects_scan_interval_above_maximum(
                 CONF_URL: "https://example.test/data.json",
                 CONF_SCAN_INTERVAL: 1441,
                 CONF_FAILURE_MODE: FAILURE_UNAVAILABLE,
+                CONF_ENTITIES: [
+                    {
+                        "key": "temperature",
+                        "name": "Temperature",
+                        CONF_PATH: "/temperature",
+                        CONF_VALUE_TYPE: VALUE_NUMBER,
+                    }
+                ],
+            }
+        )
+        message = await client.receive_json()
+
+    assert message["success"] is False
+    assert message["error"]["code"] == "invalid_format"
+    fetch.assert_not_awaited()
+    assert hass.config_entries.async_entries(DOMAIN) == []
+
+
+async def test_create_source_rejects_zero_stale_timeout(
+    hass: HomeAssistant,
+    hass_ws_client,
+) -> None:
+    """Reject a zero retained-value stale timeout before any fetch occurs."""
+    flow = await hass.config_entries.flow.async_init(
+        DOMAIN,
+        context={"source": SOURCE_USER},
+    )
+    assert flow["step_id"] == "user"
+
+    fetch = AsyncMock()
+    client = await hass_ws_client(hass)
+    with patch(
+        "custom_components.web_data_assistant.client.WebDataClient.async_fetch",
+        new=fetch,
+    ):
+        await client.send_json(
+            {
+                "id": 1,
+                "type": f"{DOMAIN}/create_source",
+                CONF_SOURCE_NAME: "Bad Stale Timeout",
+                CONF_SOURCE_TYPE: SOURCE_JSON,
+                CONF_URL: "https://example.test/data.json",
+                CONF_FAILURE_MODE: FAILURE_KEEP_LAST,
+                CONF_MAX_STALE_MINUTES: 0,
                 CONF_ENTITIES: [
                     {
                         "key": "temperature",
