@@ -104,3 +104,31 @@ test("expired keep-last source is no longer labelled retained", async ({ page })
   await expect(expired.locator(".health")).toContainText("Source unavailable");
   await expect(expired.locator(".health")).not.toContainText("retained");
 });
+
+test("keep-last source inside its stale window remains labelled retained", async ({ page }) => {
+  await page.addInitScript(() => {
+    Date.now = () => new Date("2026-09-17T18:00:00Z").getTime();
+  });
+  await mountWithSources(page, [
+    {
+      entry_id: "recent",
+      title: "Recently Retained Source",
+      state: "loaded",
+      source_type: "json",
+      url: "https://example.test/recent",
+      entity_count: 1,
+      scan_interval: 5,
+      failure_mode: "keep_last",
+      max_stale_minutes: 30,
+      source_available: false,
+      extraction_error_count: 0,
+      last_successful_update: "2026-09-17T17:45:00+00:00",
+    },
+  ]);
+
+  const shadow = page.locator("web-data-assistant-panel").locator(":scope");
+  const recent = shadow.locator(".source-card").filter({ hasText: "Recently Retained Source" });
+
+  await expect(recent.locator(".health")).toHaveClass(/retained/);
+  await expect(recent.locator(".health")).toContainText("Source unavailable · retained");
+});
