@@ -12,6 +12,7 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 from custom_components.web_data_assistant.const import (
     CONF_ENTITIES,
     CONF_FAILURE_MODE,
+    CONF_MAX_STALE_MINUTES,
     CONF_METHOD,
     CONF_PATH,
     CONF_SCAN_INTERVAL,
@@ -21,6 +22,7 @@ from custom_components.web_data_assistant.const import (
     CONF_VALUE_TYPE,
     CONF_VERIFY_SSL,
     DOMAIN,
+    FAILURE_KEEP_LAST,
     FAILURE_UNAVAILABLE,
     METHOD_GET,
     SOURCE_JSON,
@@ -218,3 +220,52 @@ async def test_management_refresh_updates_sensor_and_hides_url_secrets(
     assert state is not None
     assert state.state == "15.2"
     assert fetch.await_count == 2
+
+
+async def test_management_source_list_uses_options_overrides(
+    hass: HomeAssistant,
+    hass_ws_client,
+) -> None:
+    """Show the effective runtime policy from options instead of stale entry defaults."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Override Weather",
+        data={
+            CONF_SOURCE_NAME: "Override Weather",
+            CONF_SOURCE_TYPE: SOURCE_JSON,
+            CONF_URL: "https://example.test/weather.json",
+            CONF_SCAN_INTERVAL: 5,
+            CONF_FAILURE_MODE: FAILURE_UNAVAILABLE,
+            CONF_ENTITIES: [
+                {
+                    "key": "temperature",
+                    "name": "Temperature",
+                    CONF_PATH: "/current/temperature",
+                    CONF_VALUE_TYPE: VALUE_NUMBER,
+                }
+            ],
+        },
+        options={
+            CONF_SCAN_INTERVAL: 30,
+            CONF_FAILURE_MODE: FAILURE_KEEP_LAST,
+            CONF_MAX_STALE_MINUTES: 90,
+        },
+    )
+    entry.add_to_hass(hass)
+
+    with patch(
+        "custom_components.web_data_assistant.client.WebDataClient.async_fetch",
+        new=AsyncMock(return_value=_response()),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+    client = await hass_ws_client(hass)
+    await client.send_json({"id": 1, "type": f"{DOMAIN}/list_sources"})
+    message = await client.receive_json()
+
+    assert message["success"] is True
+    source = message["result"]["sources"][0]
+    assert source["scan_interval"] == 30
+    assert source["failure_mode"] == FAILURE_KEEP_LAST
+    assert source["max_stale_minutes"] == 90
