@@ -335,3 +335,30 @@ async def test_client_honors_declared_response_charset(
     assert response.status == 200
     assert response.text == "Crème brûlée"
     assert "charset=iso-8859-1" in response.content_type
+
+
+async def test_client_does_not_send_payload_with_get(
+    hass: HomeAssistant,
+    aiohttp_server,
+    socket_enabled,
+) -> None:
+    """Ignore a configured payload when the request method is GET."""
+    app = web.Application()
+    received_body: list[bytes] = []
+
+    async def capture_get(request: web.Request) -> web.Response:
+        received_body.append(await request.read())
+        return web.json_response({"ok": True})
+
+    app.router.add_get("/get", capture_get)
+    server = await aiohttp_server(app)
+
+    response = await WebDataClient(hass).async_fetch(
+        str(server.make_url("/get")),
+        method="GET",
+        payload='{"should":"not be sent"}',
+        parse_json=True,
+    )
+
+    assert received_body == [b""]
+    assert response.json_data == {"ok": True}
