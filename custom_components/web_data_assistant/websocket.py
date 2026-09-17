@@ -51,9 +51,9 @@ from .const import (
     VALUE_TEXT,
 )
 from .extraction import (
+    discover_json_candidates,
     extract_html_value,
     find_html_text_matches,
-    iter_json_candidates,
     resolve_json_pointer,
 )
 from .preview import build_html_preview
@@ -138,6 +138,7 @@ async def websocket_preview_json(
         connection.send_error(msg["id"], "fetch_failed", str(err))
         return
 
+    discovered, truncated = discover_json_candidates(response.json_data)
     candidates = [
         {
             "path": candidate.path,
@@ -145,7 +146,7 @@ async def websocket_preview_json(
             "preview": candidate.preview,
             "value_type": type(candidate.value).__name__,
         }
-        for candidate in iter_json_candidates(response.json_data)
+        for candidate in discovered
     ]
     connection.send_result(
         msg["id"],
@@ -153,6 +154,7 @@ async def websocket_preview_json(
             "status": response.status,
             "content_type": response.content_type,
             "values": candidates,
+            "truncated": truncated,
         },
     )
 
