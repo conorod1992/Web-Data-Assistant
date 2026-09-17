@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from typing import Any
+from urllib.parse import urlsplit
 
 import voluptuous as vol
 
@@ -49,7 +50,7 @@ from .const import (
     VALUE_NUMBER,
     VALUE_TEXT,
 )
-from .extraction import find_html_text_matches, iter_json_candidates
+from .extraction import discover_json_candidates, find_html_text_matches
 from .frontend import async_register_frontend
 from .models import HtmlMatch, JsonCandidate, WebDataEntityConfig
 from .websocket import async_register_websocket_commands
@@ -65,6 +66,7 @@ class WebDataAssistantConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._source: dict[str, Any] = {}
         self._response_text: str | None = None
         self._json_candidates: list[JsonCandidate] = []
+        self._json_truncated = False
         self._html_matches: list[HtmlMatch] = []
         self._search_text: str = ""
 
@@ -76,17 +78,23 @@ class WebDataAssistantConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         await async_register_frontend(self.hass)
 
         if user_input is not None:
-            if user_input.pop("_panel_create", False):
-                title = str(user_input[CONF_SOURCE_NAME]).strip() or "Web data source"
-                return self.async_create_entry(title=title, data=user_input)
-            self._source.update(user_input)
+            submitted = dict(user_input)
+            if submitted.pop("_panel_create", False):
+                title = str(submitted[CONF_SOURCE_NAME]).strip() or "Web data source"
+                return self.async_create_entry(title=title, data=submitted)
+            submitted[CONF_SOURCE_NAME] = str(submitted[CONF_SOURCE_NAME]).strip()
+            self._source.update(submitted)
             return await self.async_step_source()
 
         return self.async_show_form(
             step_id="user",
             data_schema=vol.Schema(
                 {
-                    vol.Required(CONF_SOURCE_NAME): str,
+                    vol.Required(CONF_SOURCE_NAME): vol.All(
+                        str,
+                        lambda value: value.strip(),
+                        vol.Length(min=1, max=100),
+                    ),
                     vol.Required(CONF_SOURCE_TYPE, default=SOURCE_JSON): SelectSelector(
                         SelectSelectorConfig(
                             options=[SOURCE_JSON, SOURCE_SCRAPE],
@@ -103,12 +111,18 @@ class WebDataAssistantConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Collect connection details and test the source."""
         errors: dict[str, str] = {}
         if user_input is not None:
+            url = str(user_input.get(CONF_URL, "")).strip()
+            if not self._is_http_url(url):
+                errors[CONF_URL] = "invalid_url"
+
             try:
                 headers = self._parse_headers(user_input.get(CONF_HEADERS, ""))
             except ValueError:
                 errors[CONF_HEADERS] = "invalid_headers"
-            else:
+
+            if not errors:
                 self._source.update(user_input)
+                self._source[CONF_URL] = url
                 self._source[CONF_HEADERS] = headers
                 if not self._source.get(CONF_PAYLOAD):
                     self._source.pop(CONF_PAYLOAD, None)
@@ -128,7 +142,10 @@ class WebDataAssistantConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 else:
                     self._response_text = response.text
                     if self._source[CONF_SOURCE_TYPE] == SOURCE_JSON:
-                        self._json_candidates = list(iter_json_candidates(response.json_data))
+                        (
+                            self._json_candidates,
+                            self._json_truncated,
+                        ) = discover_json_candidates(response.json_data)
                         if not self._json_candidates:
                             errors["base"] = "no_json_values"
                         else:
@@ -205,6 +222,11 @@ class WebDataAssistantConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             )
             for candidate in self._json_candidates
         ]
+        limit_note = (
+            "Only the first 250 scalar values are shown."
+            if self._json_truncated
+            else "All discovered scalar values are shown."
+        )
         return self.async_show_form(
             step_id="json_values",
             data_schema=vol.Schema(
@@ -215,7 +237,10 @@ class WebDataAssistantConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 }
             ),
             errors=errors,
-            description_placeholders={"count": str(len(options))},
+            description_placeholders={
+                "count": str(len(options)),
+                "limit_note": limit_note,
+            },
         )
 
     async def async_step_json_full(
@@ -247,8 +272,10 @@ class WebDataAssistantConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             self._search_text = user_input[CONF_SEARCH_TEXT].strip()
             if self._response_text is None:
                 return await self.async_step_source()
-            self._html_matches = find_html_text_matches(
-                self._response_text, self._search_text
+            self._html_matches = await self.hass.async_add_executor_job(
+                find_html_text_matches,
+                self._response_text,
+                self._search_text,
             )
             if not self._html_matches:
                 errors["base"] = "text_not_found"
@@ -259,7 +286,15 @@ class WebDataAssistantConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         return self.async_show_form(
             step_id="scrape_search",
-            data_schema=vol.Schema({vol.Required(CONF_SEARCH_TEXT): str}),
+            data_schema=vol.Schema(
+                {
+                    vol.Required(CONF_SEARCH_TEXT): vol.All(
+                        str,
+                        lambda value: value.strip(),
+                        vol.Length(min=1, max=500),
+                    )
+                }
+            ),
             errors=errors,
         )
 
@@ -310,8 +345,9 @@ class WebDataAssistantConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Configure refresh and failure behaviour."""
         if user_input is not None:
             self._source.update(user_input)
-            max_stale = self._source.get(CONF_MAX_STALE_MINUTES)
-            if not max_stale:
+            if self._source.get(CONF_FAILURE_MODE) != FAILURE_KEEP_LAST:
+                self._source.pop(CONF_MAX_STALE_MINUTES, None)
+            elif not self._source.get(CONF_MAX_STALE_MINUTES):
                 self._source.pop(CONF_MAX_STALE_MINUTES, None)
             return self.async_create_entry(
                 title=self._source[CONF_SOURCE_NAME],
@@ -353,6 +389,12 @@ class WebDataAssistantConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if not isinstance(parsed, dict):
             raise ValueError("Headers must be a JSON object")
         return {str(key): str(item) for key, item in parsed.items()}
+
+    @staticmethod
+    def _is_http_url(value: str) -> bool:
+        """Return whether a URL is a usable HTTP(S) endpoint."""
+        parts = urlsplit(value)
+        return parts.scheme.casefold() in {"http", "https"} and bool(parts.netloc)
 
     @staticmethod
     def _infer_value_type(value: Any) -> str:
@@ -398,7 +440,9 @@ class WebDataAssistantOptionsFlow(config_entries.OptionsFlowWithReload):
     ) -> ConfigFlowResult:
         """Manage Web Data Assistant options."""
         if user_input is not None:
-            if not user_input.get(CONF_MAX_STALE_MINUTES):
+            if user_input.get(CONF_FAILURE_MODE) != FAILURE_KEEP_LAST:
+                user_input.pop(CONF_MAX_STALE_MINUTES, None)
+            elif not user_input.get(CONF_MAX_STALE_MINUTES):
                 user_input.pop(CONF_MAX_STALE_MINUTES, None)
             return self.async_create_entry(data=user_input)
 
