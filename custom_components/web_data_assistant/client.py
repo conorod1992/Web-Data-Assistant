@@ -10,7 +10,7 @@ import aiohttp
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
-from .const import DEFAULT_REQUEST_TIMEOUT, METHOD_GET
+from .const import DEFAULT_REQUEST_TIMEOUT, MAX_RESPONSE_BYTES, METHOD_GET
 from .models import FetchResponse
 
 
@@ -58,12 +58,32 @@ class WebDataClient:
                     url,
                     **request_kwargs,
                 ) as response:
-                    text = await response.text(errors="replace")
                     if response.status < 200 or response.status >= 300:
                         raise WebDataConnectionError(
                             f"Source returned HTTP {response.status}"
                         )
+
+                    if (
+                        response.content_length is not None
+                        and response.content_length > MAX_RESPONSE_BYTES
+                    ):
+                        raise WebDataResponseError(
+                            "The source response is too large to process safely"
+                        )
+
+                    body = await response.content.read(MAX_RESPONSE_BYTES + 1)
+                    if len(body) > MAX_RESPONSE_BYTES:
+                        raise WebDataResponseError(
+                            "The source response is too large to process safely"
+                        )
+
+                    charset = response.charset or "utf-8"
+                    try:
+                        text = body.decode(charset, errors="replace")
+                    except LookupError:
+                        text = body.decode("utf-8", errors="replace")
                     content_type = response.headers.get("Content-Type", "")
+                    status = response.status
         except TimeoutError as err:
             raise WebDataConnectionError("The request timed out") from err
         except aiohttp.ClientError as err:
@@ -79,7 +99,7 @@ class WebDataClient:
                 ) from err
 
         return FetchResponse(
-            status=response.status,
+            status=status,
             content_type=content_type,
             text=text,
             json_data=json_data,
