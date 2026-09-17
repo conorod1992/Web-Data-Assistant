@@ -200,3 +200,39 @@ async def test_client_times_out_slow_http_response(
 
     with pytest.raises(WebDataConnectionError, match="The request timed out"):
         await WebDataClient(hass).async_fetch(str(server.make_url("/slow")))
+
+
+async def test_client_sends_post_headers_and_raw_body(
+    hass: HomeAssistant,
+    aiohttp_server,
+    socket_enabled,
+) -> None:
+    """Send configured POST method, headers and raw payload over real HTTP."""
+    app = web.Application()
+    received: dict[str, str] = {}
+
+    async def capture(request: web.Request) -> web.Response:
+        received["method"] = request.method
+        received["authorization"] = request.headers.get("Authorization", "")
+        received["mode"] = request.headers.get("X-Mode", "")
+        received["body"] = await request.text()
+        return web.json_response({"accepted": True})
+
+    app.router.add_post("/submit", capture)
+    server = await aiohttp_server(app)
+
+    response = await WebDataClient(hass).async_fetch(
+        str(server.make_url("/submit")),
+        method="POST",
+        headers={"Authorization": "Bearer test-token", "X-Mode": "integration"},
+        payload='{"query":"current"}',
+        parse_json=True,
+    )
+
+    assert received == {
+        "method": "POST",
+        "authorization": "Bearer test-token",
+        "mode": "integration",
+        "body": '{"query":"current"}',
+    }
+    assert response.json_data == {"accepted": True}
