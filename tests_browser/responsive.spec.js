@@ -24,7 +24,7 @@ test("panel remains usable without horizontal overflow on a narrow viewport", as
   await expect(shadow.getByRole("heading", { name: "Web Data Assistant" })).toBeVisible();
   await expect(shadow.getByLabel("Source name")).toBeVisible();
   await expect(shadow.getByLabel("URL")).toBeVisible();
-  await expect(shadow.getByRole("button", { name: "Load source" })).toBeVisible();
+  await expect(shadow.getByRole("button", { name: "Load JSON" })).toBeVisible();
 
   const metrics = await page.locator("web-data-assistant-panel").evaluate((panel) => {
     const pageNode = panel.shadowRoot.querySelector(".page");
