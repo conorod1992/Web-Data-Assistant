@@ -71,6 +71,9 @@ class WebDataAssistantConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     ) -> ConfigFlowResult:
         """Choose the kind of data source to create."""
         if user_input is not None:
+            if user_input.pop("_panel_create", False):
+                title = str(user_input[CONF_SOURCE_NAME]).strip() or "Web data source"
+                return self.async_create_entry(title=title, data=user_input)
             self._source.update(user_input)
             return await self.async_step_source()
 
