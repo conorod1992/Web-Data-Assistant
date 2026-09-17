@@ -1,4 +1,4 @@
-"""Authorization coverage for Web Data Assistant source refresh."""
+"""Authorization and error coverage for Web Data Assistant source refresh."""
 
 from __future__ import annotations
 
@@ -75,3 +75,23 @@ async def test_refresh_source_requires_admin(
     assert message["success"] is False
     assert message["error"]["code"] == "unauthorized"
     assert fetch.await_count == 1
+
+
+async def test_refresh_source_reports_missing_entry(
+    hass: HomeAssistant,
+    hass_ws_client,
+) -> None:
+    """Return a stable not_found error when dashboard state references a removed source."""
+    client = await hass_ws_client(hass)
+    await client.send_json(
+        {
+            "id": 1,
+            "type": f"{DOMAIN}/refresh_source",
+            "entry_id": "missing-entry",
+        }
+    )
+    message = await client.receive_json()
+
+    assert message["success"] is False
+    assert message["error"]["code"] == "not_found"
+    assert message["error"]["message"] == "Source was not found"
