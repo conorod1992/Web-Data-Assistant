@@ -4,7 +4,7 @@
     "step": {
       "user": {
         "title": "Add a web data source",
-        "description": "Choose what kind of source you want Web Data Assistant to guide you through.",
+        "description": "For the full visual experience, open **Web Data Assistant** in the sidebar now. You can also continue here using the standard Home Assistant setup flow.",
         "data": {
           "source_name": "Name",
           "source_type": "Source type"
