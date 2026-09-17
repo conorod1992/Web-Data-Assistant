@@ -236,3 +236,23 @@ async def test_create_source_rejects_scrape_selector_absent_from_sample(
     assert message["success"] is False
     assert message["error"]["code"] == "validation_failed"
     assert hass.config_entries.async_entries(DOMAIN) == []
+
+
+async def test_list_sources_requires_admin(
+    hass: HomeAssistant,
+    hass_ws_client,
+    hass_read_only_access_token: str,
+) -> None:
+    """Reject source-management listing for a non-admin Home Assistant user."""
+    flow = await hass.config_entries.flow.async_init(
+        DOMAIN,
+        context={"source": SOURCE_USER},
+    )
+    assert flow["step_id"] == "user"
+
+    client = await hass_ws_client(hass, hass_read_only_access_token)
+    await client.send_json({"id": 1, "type": f"{DOMAIN}/list_sources"})
+    message = await client.receive_json()
+
+    assert message["success"] is False
+    assert message["error"]["code"] == "unauthorized"
