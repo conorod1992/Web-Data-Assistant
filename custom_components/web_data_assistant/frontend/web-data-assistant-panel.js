@@ -226,7 +226,7 @@ class WebDataAssistantPanel extends HTMLElement {
     if (!this._sourcesLoaded) {
       return `<section class="card"><h2>Configured sources</h2><p class="hint">Loading configured sources…</p></section>`;
     }
-    if (this._sourcesError) {
+    if (this._sourcesError && !this._sources.length) {
       return `<section class="card"><h2>Configured sources</h2><div class="notice error">${this._html(this._sourcesError)}</div></section>`;
     }
     if (!this._sources.length) {
@@ -262,7 +262,10 @@ class WebDataAssistantPanel extends HTMLElement {
         </div>`;
     }).join("");
 
-    return `<section class="card"><div class="heading"><div><h2>Configured sources</h2><p>Current source health is shown without exposing request credentials or retrieved values.</p></div></div><div class="source-list">${cards}</div></section>`;
+    const sourceError = this._sourcesError
+      ? `<div class="notice error" style="margin-bottom:12px;">${this._html(this._sourcesError)}</div>`
+      : "";
+    return `<section class="card"><div class="heading"><div><h2>Configured sources</h2><p>Current source health is shown without exposing request credentials or retrieved values.</p></div></div>${sourceError}<div class="source-list">${cards}</div></section>`;
   }
 
   _sourceHealth(source) {
