@@ -138,3 +138,28 @@ test("no-match scrape text search keeps the loaded preview ready for another sea
   await expect(shadow.getByRole("heading", { name: "Selected value" })).toBeVisible();
   await expect(shadow.getByRole("button", { name: "Create in Home Assistant" })).toBeEnabled();
 });
+
+test("empty scrape text search is rejected before a search request", async ({ page }) => {
+  await mountPanel(page, {
+    "web_data_assistant/preview_html": {
+      status: 200,
+      content_type: "text/html",
+      html: '<!doctype html><html><body><span data-wda-preview-id="temp">14°C</span></body></html>',
+      elements: {},
+    },
+  });
+
+  const shadow = page.locator("web-data-assistant-panel").locator(":scope");
+  await shadow.getByRole("button", { name: /Web page/ }).click();
+  await shadow.getByLabel("Source name").fill("Carlow Temperature");
+  await shadow.getByLabel("URL").fill("https://example.test/weather");
+  await shadow.getByRole("button", { name: "Load source" }).click();
+
+  await shadow.getByRole("button", { name: "Find text" }).click();
+
+  await expect(shadow.locator(".error")).toContainText("Enter the current text or value to find.");
+  const searchCalls = await page.evaluate(() =>
+    window.__webDataMessages.filter((message) => message.type === "web_data_assistant/search_html")
+  );
+  expect(searchCalls).toEqual([]);
+});
