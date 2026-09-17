@@ -13,15 +13,11 @@ from homeassistant.util import dt as dt_util
 
 from .client import WebDataClient, WebDataError
 from .const import (
-    CONF_ATTRIBUTE,
     CONF_ENTITIES,
     CONF_HEADERS,
-    CONF_INDEX,
     CONF_METHOD,
-    CONF_PATH,
     CONF_PAYLOAD,
     CONF_SCAN_INTERVAL,
-    CONF_SELECTOR,
     CONF_SOURCE_TYPE,
     CONF_URL,
     CONF_VERIFY_SSL,
@@ -84,8 +80,6 @@ class WebDataCoordinator(DataUpdateCoordinator[ExtractionResult]):
         for entity in self.entity_configs:
             try:
                 if source_type == SOURCE_JSON:
-                    if response.json_data is None:
-                        raise ValueError("JSON response was not available")
                     if entity.path is None:
                         raise ValueError("No JSON path is configured")
                     value = resolve_json_pointer(response.json_data, entity.path)
