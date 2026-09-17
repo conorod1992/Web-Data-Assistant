@@ -42,6 +42,25 @@ jobs:
       - name: Run pure helper tests
         run: python -m unittest discover -s tests -v
 
+  home-assistant:
+    name: Home Assistant runtime smoke tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.14
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+          cache: pip
+
+      - name: Install Home Assistant test harness
+        run: python -m pip install pytest-homeassistant-custom-component==0.13.365
+
+      - name: Run Home Assistant integration tests
+        run: python -m pytest -q tests/test_integration.py --maxfail=1
+
   hassfest:
     name: Home Assistant hassfest
     runs-on: ubuntu-latest
