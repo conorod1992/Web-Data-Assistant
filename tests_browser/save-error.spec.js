@@ -42,7 +42,7 @@ test("failed source creation preserves the user's configured JSON selection", as
   const shadow = page.locator("web-data-assistant-panel").locator(":scope");
   await shadow.getByLabel("Source name").fill("Carlow Weather");
   await shadow.getByLabel("URL").fill("https://example.test/weather.json");
-  await shadow.getByRole("button", { name: "Load source" }).click();
+  await shadow.getByRole("button", { name: "Load JSON" }).click();
   await shadow.locator(".json-row").filter({ hasText: "temperature" }).locator("input[type=checkbox]").check();
 
   const review = shadow.locator(".sensor-review-row").filter({ hasText: "temperature" });
