@@ -21,22 +21,28 @@ from .const import (
     CONF_PATH,
     CONF_PAYLOAD,
     CONF_SCAN_INTERVAL,
+    CONF_SEARCH_TEXT,
     CONF_SELECTOR,
     CONF_SOURCE_NAME,
     CONF_SOURCE_TYPE,
     CONF_URL,
-    CONF_VALUE_TYPE,
     CONF_VERIFY_SSL,
     DEFAULT_FAILURE_MODE,
     DEFAULT_SCAN_INTERVAL_MINUTES,
     DEFAULT_VERIFY_SSL,
     DOMAIN,
+    FAILURE_KEEP_LAST,
+    FAILURE_UNAVAILABLE,
     METHOD_GET,
     SOURCE_JSON,
     SOURCE_SCRAPE,
-    VALUE_TEXT,
 )
-from .extraction import extract_html_value, iter_json_candidates, resolve_json_pointer
+from .extraction import (
+    extract_html_value,
+    find_html_text_matches,
+    iter_json_candidates,
+    resolve_json_pointer,
+)
 from .preview import build_html_preview
 
 
@@ -47,6 +53,16 @@ _COMMON_FIELDS: dict[Any, Any] = {
     vol.Optional(CONF_PAYLOAD): str,
     vol.Optional(CONF_VERIFY_SSL, default=DEFAULT_VERIFY_SSL): bool,
 }
+
+
+def _fetch_kwargs(msg: dict[str, Any]) -> dict[str, Any]:
+    """Return common client keyword arguments from a WebSocket message."""
+    return {
+        "method": msg.get(CONF_METHOD, METHOD_GET),
+        "headers": msg.get(CONF_HEADERS),
+        "payload": msg.get(CONF_PAYLOAD),
+        "verify_ssl": msg.get(CONF_VERIFY_SSL, DEFAULT_VERIFY_SSL),
+    }
 
 
 @websocket_api.websocket_command(
@@ -67,10 +83,7 @@ async def websocket_preview_json(
     try:
         response = await client.async_fetch(
             msg[CONF_URL],
-            method=msg.get(CONF_METHOD, METHOD_GET),
-            headers=msg.get(CONF_HEADERS),
-            payload=msg.get(CONF_PAYLOAD),
-            verify_ssl=msg.get(CONF_VERIFY_SSL, DEFAULT_VERIFY_SSL),
+            **_fetch_kwargs(msg),
             parse_json=True,
         )
     except WebDataError as err:
@@ -114,10 +127,7 @@ async def websocket_preview_html(
     try:
         response = await client.async_fetch(
             msg[CONF_URL],
-            method=msg.get(CONF_METHOD, METHOD_GET),
-            headers=msg.get(CONF_HEADERS),
-            payload=msg.get(CONF_PAYLOAD),
-            verify_ssl=msg.get(CONF_VERIFY_SSL, DEFAULT_VERIFY_SSL),
+            **_fetch_kwargs(msg),
             parse_json=False,
         )
         preview_html, elements = build_html_preview(response.text, msg[CONF_URL])
@@ -144,13 +154,66 @@ async def websocket_preview_html(
 
 @websocket_api.websocket_command(
     {
+        vol.Required("type"): f"{DOMAIN}/search_html",
+        vol.Required(CONF_SEARCH_TEXT): vol.All(str, vol.Length(min=1, max=500)),
+        **_COMMON_FIELDS,
+    }
+)
+@websocket_api.require_admin
+@websocket_api.async_response
+async def websocket_search_html(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Find the smallest page elements containing user-entered visible text."""
+    client = WebDataClient(hass)
+    try:
+        response = await client.async_fetch(
+            msg[CONF_URL],
+            **_fetch_kwargs(msg),
+            parse_json=False,
+        )
+        matches = find_html_text_matches(response.text, msg[CONF_SEARCH_TEXT])
+    except WebDataError as err:
+        connection.send_error(msg["id"], "fetch_failed", str(err))
+        return
+    except (TypeError, ValueError) as err:
+        connection.send_error(msg["id"], "search_failed", str(err))
+        return
+
+    connection.send_result(
+        msg["id"],
+        {
+            "matches": [
+                {
+                    "selector": match.selector,
+                    "index": match.index,
+                    "text": match.text,
+                    "context": match.context,
+                    "tag": match.tag,
+                }
+                for match in matches
+            ]
+        },
+    )
+
+
+@websocket_api.websocket_command(
+    {
         vol.Required("type"): f"{DOMAIN}/create_source",
-        vol.Required(CONF_SOURCE_NAME): str,
+        vol.Required(CONF_SOURCE_NAME): vol.All(str, vol.Length(min=1, max=100)),
         vol.Required(CONF_SOURCE_TYPE): vol.In([SOURCE_JSON, SOURCE_SCRAPE]),
-        vol.Required(CONF_ENTITIES): [dict],
-        vol.Optional(CONF_SCAN_INTERVAL, default=DEFAULT_SCAN_INTERVAL_MINUTES): int,
-        vol.Optional(CONF_FAILURE_MODE, default=DEFAULT_FAILURE_MODE): str,
-        vol.Optional(CONF_MAX_STALE_MINUTES): int,
+        vol.Required(CONF_ENTITIES): vol.All([dict], vol.Length(min=1, max=100)),
+        vol.Optional(CONF_SCAN_INTERVAL, default=DEFAULT_SCAN_INTERVAL_MINUTES): vol.All(
+            vol.Coerce(int), vol.Range(min=1, max=1440)
+        ),
+        vol.Optional(CONF_FAILURE_MODE, default=DEFAULT_FAILURE_MODE): vol.In(
+            [FAILURE_UNAVAILABLE, FAILURE_KEEP_LAST]
+        ),
+        vol.Optional(CONF_MAX_STALE_MINUTES): vol.All(
+            vol.Coerce(int), vol.Range(min=1, max=525600)
+        ),
         **_COMMON_FIELDS,
     }
 )
@@ -164,18 +227,12 @@ async def websocket_create_source(
     """Validate a panel-built source and create it through the config flow."""
     source_type = msg[CONF_SOURCE_TYPE]
     entities = msg[CONF_ENTITIES]
-    if not entities:
-        connection.send_error(msg["id"], "invalid_entities", "Choose at least one value")
-        return
 
     client = WebDataClient(hass)
     try:
         response = await client.async_fetch(
             msg[CONF_URL],
-            method=msg.get(CONF_METHOD, METHOD_GET),
-            headers=msg.get(CONF_HEADERS),
-            payload=msg.get(CONF_PAYLOAD),
-            verify_ssl=msg.get(CONF_VERIFY_SSL, DEFAULT_VERIFY_SSL),
+            **_fetch_kwargs(msg),
             parse_json=source_type == SOURCE_JSON,
         )
         for entity in entities:
@@ -205,14 +262,14 @@ async def websocket_create_source(
         CONF_METHOD: msg.get(CONF_METHOD, METHOD_GET),
         CONF_HEADERS: msg.get(CONF_HEADERS, {}),
         CONF_VERIFY_SSL: msg.get(CONF_VERIFY_SSL, DEFAULT_VERIFY_SSL),
-        CONF_SCAN_INTERVAL: max(1, int(msg.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL_MINUTES))),
+        CONF_SCAN_INTERVAL: msg.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL_MINUTES),
         CONF_FAILURE_MODE: msg.get(CONF_FAILURE_MODE, DEFAULT_FAILURE_MODE),
         CONF_ENTITIES: entities,
     }
     if payload := msg.get(CONF_PAYLOAD):
         data[CONF_PAYLOAD] = payload
     if stale := msg.get(CONF_MAX_STALE_MINUTES):
-        data[CONF_MAX_STALE_MINUTES] = max(1, int(stale))
+        data[CONF_MAX_STALE_MINUTES] = stale
 
     result = await hass.config_entries.flow.async_init(
         DOMAIN,
@@ -236,4 +293,5 @@ def async_register_websocket_commands(hass: HomeAssistant) -> None:
     """Register frontend preview commands once for the integration."""
     websocket_api.async_register_command(hass, websocket_preview_json)
     websocket_api.async_register_command(hass, websocket_preview_html)
+    websocket_api.async_register_command(hass, websocket_search_html)
     websocket_api.async_register_command(hass, websocket_create_source)
