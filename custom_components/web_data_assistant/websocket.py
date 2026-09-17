@@ -52,10 +52,11 @@ from .const import (
 )
 from .extraction import (
     discover_json_candidates,
-    extract_html_value,
+    extract_html_entities,
     find_html_text_matches,
     resolve_json_pointer,
 )
+from .models import WebDataEntityConfig
 from .preview import build_html_preview
 
 
@@ -326,17 +327,21 @@ async def websocket_create_source(
             **_fetch_kwargs(msg),
             parse_json=source_type == SOURCE_JSON,
         )
-        for entity in entities:
-            if source_type == SOURCE_JSON:
+        if source_type == SOURCE_JSON:
+            for entity in entities:
                 resolve_json_pointer(response.json_data, str(entity[CONF_PATH]))
-            else:
-                await hass.async_add_executor_job(
-                    extract_html_value,
-                    response.text,
-                    str(entity[CONF_SELECTOR]),
-                    int(entity.get(CONF_INDEX, 0)),
-                    entity.get(CONF_ATTRIBUTE),
+        else:
+            entity_configs = [WebDataEntityConfig.from_dict(entity) for entity in entities]
+            validation_result = await hass.async_add_executor_job(
+                extract_html_entities,
+                response.text,
+                entity_configs,
+            )
+            if validation_result.extraction_errors:
+                first_key, first_error = next(
+                    iter(validation_result.extraction_errors.items())
                 )
+                raise ValueError(f"{first_key}: {first_error}")
     except (WebDataError, KeyError, TypeError, ValueError) as err:
         connection.send_error(msg["id"], "validation_failed", str(err))
         return
