@@ -91,7 +91,7 @@ class WebDataSensor(CoordinatorEntity[WebDataCoordinator], SensorEntity):
         super().__init__(coordinator)
         self._entry = entry
         self._config = config
-        self._attr_name = config.name
+        self._attr_name = None if config.name == entry.title else config.name
         self._attr_unique_id = f"{entry.entry_id}_{config.key}"
         self._attr_native_unit_of_measurement = config.unit
         self._attr_device_info = DeviceInfo(
