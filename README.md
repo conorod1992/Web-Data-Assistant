@@ -135,14 +135,41 @@ custom_components/web_data_assistant/
 └── websocket.py
 
 tests/
-└── test_extraction_preview.py
+├── conftest.py
+├── test_config_flow_runtime.py
+├── test_extraction_preview.py
+├── test_frontend_runtime.py
+├── test_integration.py
+├── test_runtime_semantics.py
+└── test_scrape_flow_runtime.py
 ```
 
 ## Validation
 
 GitHub Actions performs Python compilation, JSON validation, frontend JavaScript syntax checking and Home Assistant hassfest validation.
 
-A lightweight behavioral test suite also exercises the pure extraction and preview helpers without requiring a full Home Assistant test environment. Current coverage includes JSON Pointer escaping/resolution, discovery truncation, visible-text matching, extraction-error isolation, preview sanitization, URL-secret removal and generated-selector fidelity.
+A lightweight behavioral suite exercises the pure extraction and preview helpers without booting Home Assistant. It covers JSON Pointer escaping/resolution, discovery truncation, visible-text matching, extraction-error isolation, preview sanitization, URL-secret removal and generated-selector fidelity.
+
+A separate runtime suite is pinned to **Home Assistant 2026.9.2** through `pytest-homeassistant-custom-component==0.13.365`. It boots the integration inside Home Assistant and currently verifies:
+
+- config-entry setup and actual sensor state publication
+- startup source outages and unavailable entities
+- keep-last behavior during later source outages
+- restore-state behavior when Home Assistant restarts while the source is offline
+- exact stale-age expiry using Home Assistant time events
+- HTML scrape extraction, full-JSON attributes and long-state handling
+- multiple JSON sensors sharing one coordinator fetch and one HA service device
+- extraction failures remaining distinct from source failures and recovering on a later refresh
+- sidebar panel registration and the management WebSocket API
+- panel-driven `create_source` creating a working Home Assistant config entry
+- manual source refresh and privacy-safe URL display
+- guided JSON and guided scrape config-flow persistence
+- invalid source URL rejection
+- options-flow persistence and automatic runtime reload
+
+The runtime suite tests Home Assistant registration, state, config-flow and WebSocket behavior. It does **not** currently run a browser and therefore does not provide visual-regression coverage for the rendered custom panel itself.
+
+To run the Home Assistant runtime suite locally, install `requirements-test.txt` and run the pytest files under `tests/`.
 
 ## Installation
 
