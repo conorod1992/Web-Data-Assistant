@@ -38,16 +38,20 @@ The generated selector/index are shown only under advanced extraction details. T
 
 The preview is rendered from server-fetched HTML rather than framing the remote website. Scripts, forms, nested frames, objects and active navigation are removed, and the preview is additionally sandboxed and protected with a restrictive Content Security Policy.
 
+HTML parsing and extraction are moved off Home Assistant's event loop. Runtime scrape sources parse each fetched document once and extract all configured values from that shared parsed document.
+
 ## Failure behaviour
 
 Each source can choose what its entities should do when the website or API cannot be reached:
 
-- **Mark sensors unavailable** — the traditional Home Assistant-style behaviour.
+- **Mark sensors unavailable** — keep the entities loaded in Home Assistant but mark them unavailable while the source cannot be reached.
 - **Keep the last known value** — retain the most recent successful value during a temporary source outage.
+
+Both modes keep the config entry and its entities loaded if Home Assistant starts while the remote source is offline. This means the selected failure policy controls the entity state rather than an outage preventing the source from loading at all.
 
 Retained values survive Home Assistant restarts. If Home Assistant starts while the remote source is already offline, the entities can restore their previous successful state and replace it once live updates resume.
 
-When keeping the last value, an optional maximum stale age can eventually make the entity unavailable if successful updates do not resume. The original last-success timestamp is restored too, so the stale-age limit continues to work correctly across restarts.
+When keeping the last value, an optional maximum stale age can eventually make the entity unavailable if successful updates do not resume. The original last-success timestamp is restored too, and a timer updates availability at the configured deadline rather than waiting for a later polling attempt.
 
 A source-connection failure and an extraction failure are deliberately treated differently. A temporary HTTP/DNS/timeout failure may retain the previous value when configured to do so. If the page loads but the configured selector or JSON path no longer exists, the affected entity becomes unavailable instead of silently presenting old data as current.
 
@@ -129,11 +133,16 @@ custom_components/web_data_assistant/
 ├── translations/
 │   └── en.json
 └── websocket.py
+
+tests/
+└── test_extraction_preview.py
 ```
 
 ## Validation
 
-The repository intentionally does not include an automated behavioral test suite yet. GitHub Actions currently performs lightweight Python/JSON/JavaScript syntax validation plus Home Assistant hassfest validation so malformed metadata, translations and integration structure are caught early.
+GitHub Actions performs Python compilation, JSON validation, frontend JavaScript syntax checking and Home Assistant hassfest validation.
+
+A lightweight behavioral test suite also exercises the pure extraction and preview helpers without requiring a full Home Assistant test environment. Current coverage includes JSON Pointer escaping/resolution, discovery truncation, visible-text matching, extraction-error isolation, preview sanitization, URL-secret removal and generated-selector fidelity.
 
 ## Installation
 
