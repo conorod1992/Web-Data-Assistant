@@ -2,15 +2,17 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from typing import Any, override
 
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity, SensorStateClass
 from homeassistant.const import MAX_LENGTH_STATE_STATE, STATE_UNAVAILABLE, STATE_UNKNOWN
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
+from homeassistant.helpers.event import async_track_point_in_utc_time
 from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import dt as dt_util
@@ -108,6 +110,7 @@ class WebDataSensor(
         self._restored_value: Any | None = None
         self._has_restored_value = False
         self._restored_last_successful_update: datetime | None = None
+        self._cancel_stale_timer: Callable[[], None] | None = None
         self._attr_name = None if config.name == entry.title else config.name
         self._attr_unique_id = f"{entry.entry_id}_{config.key}"
         self._attr_native_unit_of_measurement = config.unit
@@ -151,24 +154,84 @@ class WebDataSensor(
             return self.coordinator.last_successful_update
         return self._restored_last_successful_update
 
+    def _failure_mode(self) -> str:
+        """Return the effective source-failure mode."""
+        return self._entry.options.get(
+            CONF_FAILURE_MODE,
+            self._entry.data.get(CONF_FAILURE_MODE, FAILURE_UNAVAILABLE),
+        )
+
+    def _max_stale_minutes(self) -> int | None:
+        """Return the configured retained-value age limit, if any."""
+        value = self._entry.options.get(
+            CONF_MAX_STALE_MINUTES,
+            self._entry.data.get(CONF_MAX_STALE_MINUTES),
+        )
+        return int(value) if value else None
+
+    @callback
+    def _cancel_stale_expiry(self) -> None:
+        """Cancel a previously scheduled stale deadline."""
+        if self._cancel_stale_timer is not None:
+            self._cancel_stale_timer()
+            self._cancel_stale_timer = None
+
+    @callback
+    def _schedule_stale_expiry(self) -> None:
+        """Schedule a state write at the exact retained-value stale deadline."""
+        self._cancel_stale_expiry()
+
+        if self.coordinator.last_update_success:
+            return
+        if self._failure_mode() != FAILURE_KEEP_LAST:
+            return
+        max_stale = self._max_stale_minutes()
+        last_success = self._effective_last_successful_update()
+        if max_stale is None or last_success is None:
+            return
+        if not self._live_value_available() and not self._has_restored_value:
+            return
+
+        expires = last_success + timedelta(minutes=max_stale)
+        if expires <= dt_util.utcnow():
+            return
+        self._cancel_stale_timer = async_track_point_in_utc_time(
+            self.hass,
+            self._handle_stale_deadline,
+            expires,
+        )
+
+    @callback
+    def _handle_stale_deadline(self, now: datetime) -> None:
+        """Write state when a retained value crosses its age limit."""
+        self._cancel_stale_timer = None
+        self.async_write_ha_state()
+
+    @override
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        """Reschedule stale handling whenever the source refreshes."""
+        self._schedule_stale_expiry()
+        super()._handle_coordinator_update()
+
     @override
     async def async_added_to_hass(self) -> None:
         """Restore a retained value if startup could not reach the source."""
         await super().async_added_to_hass()
+        self.async_on_remove(self._cancel_stale_expiry)
 
-        failure_mode = self._entry.options.get(
-            CONF_FAILURE_MODE,
-            self._entry.data.get(CONF_FAILURE_MODE, FAILURE_UNAVAILABLE),
-        )
-        if failure_mode != FAILURE_KEEP_LAST or self._live_value_available():
+        if self._failure_mode() != FAILURE_KEEP_LAST or self._live_value_available():
+            self._schedule_stale_expiry()
             return
 
         last_state = await self.async_get_last_state()
         if last_state is None or last_state.state in {STATE_UNKNOWN, STATE_UNAVAILABLE}:
+            self._schedule_stale_expiry()
             return
 
         if self._config.value_type == VALUE_JSON:
             if "data" not in last_state.attributes:
+                self._schedule_stale_expiry()
                 return
             self._restored_value = last_state.attributes["data"]
         elif "full_value" in last_state.attributes:
@@ -184,6 +247,7 @@ class WebDataSensor(
             )
         if self._restored_last_successful_update is None:
             self._restored_last_successful_update = last_state.last_updated
+        self._schedule_stale_expiry()
 
     @property
     def native_value(self) -> Any:
@@ -203,20 +267,13 @@ class WebDataSensor(
         if self.coordinator.last_update_success:
             return self._live_value_available()
 
-        failure_mode = self._entry.options.get(
-            CONF_FAILURE_MODE,
-            self._entry.data.get(CONF_FAILURE_MODE, FAILURE_UNAVAILABLE),
-        )
-        if failure_mode != FAILURE_KEEP_LAST:
+        if self._failure_mode() != FAILURE_KEEP_LAST:
             return False
         if not self._live_value_available() and not self._has_restored_value:
             return False
 
-        max_stale = self._entry.options.get(
-            CONF_MAX_STALE_MINUTES,
-            self._entry.data.get(CONF_MAX_STALE_MINUTES),
-        )
-        if not max_stale:
+        max_stale = self._max_stale_minutes()
+        if max_stale is None:
             return True
 
         last_successful_update = self._effective_last_successful_update()
@@ -224,7 +281,7 @@ class WebDataSensor(
             return False
 
         age = dt_util.utcnow() - last_successful_update
-        return age <= timedelta(minutes=int(max_stale))
+        return age <= timedelta(minutes=max_stale)
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
