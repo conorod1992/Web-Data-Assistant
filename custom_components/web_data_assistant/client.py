@@ -92,7 +92,12 @@ class WebDataClient:
         except TimeoutError as err:
             raise WebDataConnectionError("The request timed out") from err
         except aiohttp.ClientError as err:
-            raise WebDataConnectionError(str(err)) from err
+            # Do not surface aiohttp's raw exception string: connector errors can
+            # contain the requested URL, including sensitive query parameters.
+            error_type = type(err).__name__
+            raise WebDataConnectionError(
+                f"The source could not be reached ({error_type})"
+            ) from err
 
         json_data: Any | None = None
         if parse_json:
