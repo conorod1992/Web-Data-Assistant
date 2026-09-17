@@ -5,6 +5,7 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, patch
 
 from homeassistant.core import HomeAssistant
+from homeassistant.setup import async_setup_component
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.web_data_assistant.const import (
@@ -95,3 +96,46 @@ async def test_refresh_source_reports_missing_entry(
     assert message["success"] is False
     assert message["error"]["code"] == "not_found"
     assert message["error"]["message"] == "Source was not found"
+
+
+async def test_refresh_source_reports_unloaded_entry(
+    hass: HomeAssistant,
+    hass_ws_client,
+) -> None:
+    """Return a stable not_loaded error for a configured source that is not running."""
+    assert await async_setup_component(hass, DOMAIN, {})
+    await hass.async_block_till_done()
+
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Stopped Weather API",
+        data={
+            CONF_SOURCE_NAME: "Stopped Weather API",
+            CONF_SOURCE_TYPE: SOURCE_JSON,
+            CONF_URL: "https://example.test/weather.json",
+            CONF_FAILURE_MODE: FAILURE_UNAVAILABLE,
+            CONF_ENTITIES: [
+                {
+                    "key": "temperature",
+                    "name": "Temperature",
+                    CONF_PATH: "/temperature",
+                    CONF_VALUE_TYPE: VALUE_NUMBER,
+                }
+            ],
+        },
+    )
+    entry.add_to_hass(hass)
+
+    client = await hass_ws_client(hass)
+    await client.send_json(
+        {
+            "id": 1,
+            "type": f"{DOMAIN}/refresh_source",
+            "entry_id": entry.entry_id,
+        }
+    )
+    message = await client.receive_json()
+
+    assert message["success"] is False
+    assert message["error"]["code"] == "not_loaded"
+    assert message["error"]["message"] == "Source is not currently loaded"
