@@ -42,6 +42,27 @@ jobs:
       - name: Run pure helper tests
         run: python tests/test_extraction_preview.py -v
 
+  browser:
+    name: Browser panel smoke tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: Install browser test dependencies
+        run: npm install
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Run browser tests
+        run: npm run test:browser
+
   home-assistant:
     name: Home Assistant runtime smoke tests
     runs-on: ubuntu-latest
