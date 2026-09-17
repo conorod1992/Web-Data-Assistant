@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import gzip
 
 import pytest
 from aiohttp import web
@@ -362,3 +363,34 @@ async def test_client_does_not_send_payload_with_get(
 
     assert received_body == [b""]
     assert response.json_data == {"ok": True}
+
+
+async def test_client_parses_gzip_compressed_json(
+    hass: HomeAssistant,
+    aiohttp_server,
+    socket_enabled,
+) -> None:
+    """Parse JSON after aiohttp transparently decompresses a gzip response."""
+    app = web.Application()
+    body = gzip.compress(b'{"temperature":14.6,"condition":"Cloudy"}')
+
+    async def compressed(_request: web.Request) -> web.Response:
+        return web.Response(
+            body=body,
+            headers={
+                "Content-Type": "application/json",
+                "Content-Encoding": "gzip",
+            },
+        )
+
+    app.router.add_get("/gzip", compressed)
+    server = await aiohttp_server(app)
+
+    response = await WebDataClient(hass).async_fetch(
+        str(server.make_url("/gzip")),
+        parse_json=True,
+    )
+
+    assert response.status == 200
+    assert response.json_data == {"temperature": 14.6, "condition": "Cloudy"}
+    assert response.text == '{"temperature":14.6,"condition":"Cloudy"}'
