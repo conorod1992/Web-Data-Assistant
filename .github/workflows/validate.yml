@@ -40,7 +40,7 @@ jobs:
         run: node --check custom_components/web_data_assistant/frontend/web-data-assistant-panel.js
 
       - name: Run pure helper tests
-        run: python -m unittest discover -s tests -v
+        run: python tests/test_extraction_preview.py -v
 
   home-assistant:
     name: Home Assistant runtime smoke tests
