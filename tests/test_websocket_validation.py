@@ -16,7 +16,9 @@ from custom_components.web_data_assistant.const import (
     DOMAIN,
     FAILURE_UNAVAILABLE,
     SOURCE_JSON,
+    SOURCE_SCRAPE,
     VALUE_NUMBER,
+    VALUE_TEXT,
 )
 
 
@@ -98,4 +100,41 @@ async def test_create_source_rejects_json_entity_without_path(
     assert message["success"] is False
     assert message["error"]["code"] == "invalid_entities"
     assert "missing its path" in message["error"]["message"]
+    assert hass.config_entries.async_entries(DOMAIN) == []
+
+
+async def test_create_source_rejects_scrape_entity_without_selector(
+    hass: HomeAssistant,
+    hass_ws_client,
+) -> None:
+    """Reject a web-page sensor definition that omits its CSS selector."""
+    flow = await hass.config_entries.flow.async_init(
+        DOMAIN,
+        context={"source": SOURCE_USER},
+    )
+    assert flow["step_id"] == "user"
+
+    client = await hass_ws_client(hass)
+    await client.send_json(
+        {
+            "id": 1,
+            "type": f"{DOMAIN}/create_source",
+            CONF_SOURCE_NAME: "Missing Selector",
+            CONF_SOURCE_TYPE: SOURCE_SCRAPE,
+            CONF_URL: "https://example.test/page",
+            CONF_FAILURE_MODE: FAILURE_UNAVAILABLE,
+            CONF_ENTITIES: [
+                {
+                    "key": "temperature",
+                    "name": "Temperature",
+                    CONF_VALUE_TYPE: VALUE_TEXT,
+                }
+            ],
+        }
+    )
+    message = await client.receive_json()
+
+    assert message["success"] is False
+    assert message["error"]["code"] == "invalid_entities"
+    assert "missing its selector" in message["error"]["message"]
     assert hass.config_entries.async_entries(DOMAIN) == []
