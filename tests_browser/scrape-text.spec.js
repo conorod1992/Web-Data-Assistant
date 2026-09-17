@@ -24,28 +24,37 @@ async function mountPanel(page, responses = {}) {
   }, responses);
 }
 
+test("web scrape workflow opens the real page and does not render an iframe", async ({ page }) => {
+  await mountPanel(page);
+  const shadow = page.locator("web-data-assistant-panel").locator(":scope");
+  await shadow.getByRole("button", { name: /Web page/ }).click();
+  await shadow.getByLabel("Source name").fill("Carlow Temperature");
+  await shadow.getByLabel("URL").fill("https://example.test/weather");
+
+  const openPage = shadow.getByRole("link", { name: /Open page/ });
+  await expect(openPage).toHaveAttribute("href", "https://example.test/weather");
+  await expect(openPage).toHaveAttribute("target", "_blank");
+  await expect(openPage).toHaveAttribute("rel", /noopener/);
+  await expect(shadow.locator("iframe")).toHaveCount(0);
+  await expect(shadow.getByText(/Open the real site in another tab/)).toBeVisible();
+});
+
 test("guided scrape text search disambiguates multiple visible matches", async ({ page }) => {
   await mountPanel(page, {
-    "web_data_assistant/preview_html": {
-      status: 200,
-      content_type: "text/html",
-      html: '<!doctype html><html><body><section><span data-wda-preview-id="current">14°C</span></section><section><span data-wda-preview-id="historic">14°C</span></section></body></html>',
-      elements: {},
-    },
     "web_data_assistant/search_html": {
       matches: [
         {
           selector: ".current-temperature",
           index: 0,
           text: "14°C",
-          context: "Carlow current weather 14°C",
+          context: "Carlow current weather 14°C Mostly cloudy",
           tag: "span",
         },
         {
           selector: ".historic-temperature",
           index: 0,
           text: "14°C",
-          context: "Yesterday at 13:00 14°C",
+          context: "Yesterday at 13:00 14°C Rain",
           tag: "span",
         },
       ],
@@ -56,29 +65,28 @@ test("guided scrape text search disambiguates multiple visible matches", async (
   await shadow.getByRole("button", { name: /Web page/ }).click();
   await shadow.getByLabel("Source name").fill("Carlow Current Temperature");
   await shadow.getByLabel("URL").fill("https://example.test/weather");
-  await shadow.getByRole("button", { name: "Load source" }).click();
-
   await shadow.getByLabel("Current text or value").fill("14°C");
-  await shadow.getByRole("button", { name: "Find text" }).click();
-  await expect(shadow.getByText("2 specific matches found.")).toBeVisible();
-  await expect(shadow.getByText("Carlow current weather 14°C")).toBeVisible();
-  await expect(shadow.getByText("Yesterday at 13:00 14°C")).toBeVisible();
+  await shadow.getByRole("button", { name: "Find matches" }).click();
 
-  await shadow.locator(".match").filter({ hasText: "Carlow current weather 14°C" }).click();
+  await expect(shadow.getByText("Found 2 specific matches.")).toBeVisible();
+  await expect(shadow.getByText("Carlow current weather 14°C Mostly cloudy")).toBeVisible();
+  await expect(shadow.getByText("Yesterday at 13:00 14°C Rain")).toBeVisible();
+
+  await shadow.locator(".match").filter({ hasText: "Carlow current weather" }).click();
   await expect(shadow.getByRole("heading", { name: "Selected value" })).toBeVisible();
+  await shadow.getByLabel("Unit (optional)").fill("°C");
 
   const createButton = shadow.getByRole("button", { name: "Create in Home Assistant" });
   await expect(createButton).toBeEnabled();
   await createButton.click();
 
-  const searchMessage = await page.evaluate(() =>
-    window.__webDataMessages.find((message) => message.type === "web_data_assistant/search_html")
-  );
+  const messages = await page.evaluate(() => window.__webDataMessages);
+  expect(messages.some((message) => message.type === "web_data_assistant/preview_html")).toBe(false);
+  const searchMessage = messages.find((message) => message.type === "web_data_assistant/search_html");
   expect(searchMessage.search_text).toBe("14°C");
+  expect(searchMessage.url).toBe("https://example.test/weather");
 
-  const createMessage = await page.evaluate(() =>
-    window.__webDataMessages.find((message) => message.type === "web_data_assistant/create_source")
-  );
+  const createMessage = messages.find((message) => message.type === "web_data_assistant/create_source");
   expect(createMessage.entities).toEqual([
     {
       key: "carlow_current_temperature",
@@ -86,11 +94,13 @@ test("guided scrape text search disambiguates multiple visible matches", async (
       selector: ".current-temperature",
       index: 0,
       value_type: "text",
+      unit: "°C",
     },
   ]);
+  expect(createMessage.long_text_policy).toBe("truncate");
 });
 
-test("no-match scrape text search keeps the loaded preview ready for another search", async ({ page }) => {
+test("no-match scrape search can be retried without reloading a page preview", async ({ page }) => {
   await page.setContent("<web-data-assistant-panel></web-data-assistant-panel>");
   await page.addScriptTag({ path: PANEL_SCRIPT });
   await page.evaluate(() => {
@@ -99,14 +109,6 @@ test("no-match scrape text search keeps the loaded preview ready for another sea
     panel.hass = {
       callWS: async (message) => {
         if (message.type === "web_data_assistant/list_sources") return { sources: [] };
-        if (message.type === "web_data_assistant/preview_html") {
-          return {
-            status: 200,
-            content_type: "text/html",
-            html: '<!doctype html><html><body><span data-wda-preview-id="temp">14°C</span></body></html>',
-            elements: {},
-          };
-        }
         if (message.type === "web_data_assistant/search_html") {
           window.__searchCount += 1;
           if (window.__searchCount === 1) return { matches: [] };
@@ -123,39 +125,26 @@ test("no-match scrape text search keeps the loaded preview ready for another sea
   await shadow.getByRole("button", { name: /Web page/ }).click();
   await shadow.getByLabel("Source name").fill("Carlow Temperature");
   await shadow.getByLabel("URL").fill("https://example.test/weather");
-  await shadow.getByRole("button", { name: "Load source" }).click();
 
-  await expect(shadow.locator("iframe#preview")).toBeVisible();
   await shadow.getByLabel("Current text or value").fill("99°C");
-  await shadow.getByRole("button", { name: "Find text" }).click();
-  await expect(shadow.getByText("No matching page element was found for that text.")).toBeVisible();
-  await expect(shadow.locator("iframe#preview")).toBeVisible();
+  await shadow.getByRole("button", { name: "Find matches" }).click();
+  await expect(shadow.getByText(/That text was not found in the page response/)).toBeVisible();
   await expect(shadow.getByRole("button", { name: "Create in Home Assistant" })).toBeDisabled();
 
   await shadow.getByLabel("Current text or value").fill("14°C");
-  await shadow.getByRole("button", { name: "Find text" }).click();
+  await shadow.getByRole("button", { name: "Find matches" }).click();
   await expect(shadow.getByText("Found 1 specific match.")).toBeVisible();
   await expect(shadow.getByRole("heading", { name: "Selected value" })).toBeVisible();
   await expect(shadow.getByRole("button", { name: "Create in Home Assistant" })).toBeEnabled();
 });
 
-test("empty scrape text search is rejected before a search request", async ({ page }) => {
-  await mountPanel(page, {
-    "web_data_assistant/preview_html": {
-      status: 200,
-      content_type: "text/html",
-      html: '<!doctype html><html><body><span data-wda-preview-id="temp">14°C</span></body></html>',
-      elements: {},
-    },
-  });
-
+test("empty scrape text search is rejected before a request", async ({ page }) => {
+  await mountPanel(page);
   const shadow = page.locator("web-data-assistant-panel").locator(":scope");
   await shadow.getByRole("button", { name: /Web page/ }).click();
   await shadow.getByLabel("Source name").fill("Carlow Temperature");
   await shadow.getByLabel("URL").fill("https://example.test/weather");
-  await shadow.getByRole("button", { name: "Load source" }).click();
-
-  await shadow.getByRole("button", { name: "Find text" }).click();
+  await shadow.getByRole("button", { name: "Find matches" }).click();
 
   await expect(shadow.locator(".error")).toContainText("Enter the current text or value to find.");
   const searchCalls = await page.evaluate(() =>
