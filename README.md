@@ -136,12 +136,27 @@ custom_components/web_data_assistant/
 
 tests/
 ├── conftest.py
+├── test_client_http.py
 ├── test_config_flow_runtime.py
 ├── test_extraction_preview.py
 ├── test_frontend_runtime.py
 ├── test_integration.py
 ├── test_runtime_semantics.py
 └── test_scrape_flow_runtime.py
+
+tests_browser/
+├── error-states.spec.js
+├── json-large.spec.js
+├── json-pointer.spec.js
+├── panel-load.spec.js
+├── preview-safety.spec.js
+├── request-options.spec.js
+├── request-validation.spec.js
+├── responsive.spec.js
+├── scrape-click.spec.js
+├── scrape-text.spec.js
+├── source-health.spec.js
+└── source-refresh.spec.js
 ```
 
 ## Validation
@@ -167,9 +182,27 @@ A separate runtime suite is pinned to **Home Assistant 2026.9.2** through `pytes
 - invalid source URL rejection
 - options-flow persistence and automatic runtime reload
 
-The runtime suite tests Home Assistant registration, state, config-flow and WebSocket behavior. It does **not** currently run a browser and therefore does not provide visual-regression coverage for the rendered custom panel itself.
+The same Home Assistant job also exercises `WebDataClient` against a real local HTTP server, covering redirects, chunked responses, non-2xx errors, malformed and non-standard JSON, declared and streaming response-size limits, request timeouts, and POST headers/body transmission.
 
-To run the Home Assistant runtime suite locally, install `requirements-test.txt` and run the pytest files under `tests/`.
+A separate Playwright/Chromium suite renders the actual custom panel JavaScript and covers:
+
+- clean initial rendering and configured-source loading
+- guided multi-sensor JSON creation, names and units
+- full-response JSON mode and its Recorder warning
+- click-to-select scraping inside the sandboxed preview iframe
+- current-text scrape search with ambiguous-match disambiguation
+- preview sandbox protection against scripts and form navigation
+- unavailable, retained and extraction-degraded source health states
+- manual source refresh
+- truncated 250-value JSON discovery and filtering
+- narrow/mobile-width layout without horizontal overflow
+- advanced POST/header/body/SSL/failure/stale settings
+- escaped RFC 6901 JSON pointers
+- source-load error recovery and local request validation
+
+The Chromium tests mock the panel's `hass.callWS` boundary so they remain deterministic and fast; the real Home Assistant suite independently exercises the actual WebSocket commands and integration runtime behind that boundary. The project does not yet launch the complete authenticated Home Assistant frontend shell in Playwright, so that full-stack UI boundary remains a later test opportunity.
+
+To run the Home Assistant runtime suite locally, install `requirements-test.txt` and run the pytest files under `tests/`. Browser tests use `npm install`, `npx playwright install chromium`, and `npm run test:browser`.
 
 ## Installation
 
