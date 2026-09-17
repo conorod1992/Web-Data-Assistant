@@ -11,6 +11,7 @@ from custom_components.web_data_assistant.client import (
     WebDataConnectionError,
     WebDataResponseError,
 )
+from custom_components.web_data_assistant.const import MAX_RESPONSE_BYTES
 
 
 async def test_client_follows_http_redirects(
@@ -118,3 +119,25 @@ async def test_client_rejects_malformed_json_response(
             str(server.make_url("/malformed")),
             parse_json=True,
         )
+
+
+async def test_client_rejects_oversized_content_length(
+    hass: HomeAssistant,
+    aiohttp_server,
+    socket_enabled,
+) -> None:
+    """Reject a response whose declared body length exceeds the safety cap."""
+    app = web.Application()
+    oversized = b"x" * (MAX_RESPONSE_BYTES + 1)
+
+    async def too_large(_request: web.Request) -> web.Response:
+        return web.Response(body=oversized, content_type="text/plain")
+
+    app.router.add_get("/too-large", too_large)
+    server = await aiohttp_server(app)
+
+    with pytest.raises(
+        WebDataResponseError,
+        match="response is too large to process safely",
+    ):
+        await WebDataClient(hass).async_fetch(str(server.make_url("/too-large")))
