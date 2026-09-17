@@ -40,7 +40,7 @@ test("guided JSON selection preserves escaped RFC 6901 paths", async ({ page }) 
   const shadow = page.locator("web-data-assistant-panel").locator(":scope");
   await shadow.getByLabel("Source name").fill("Escaped JSON");
   await shadow.getByLabel("URL").fill("https://example.test/escaped.json");
-  await shadow.getByRole("button", { name: "Load source" }).click();
+  await shadow.getByRole("button", { name: "Load JSON" }).click();
   await shadow.locator(".json-row").locator("input[type=checkbox]").check();
   await shadow.getByRole("button", { name: "Create in Home Assistant" }).click();
 
