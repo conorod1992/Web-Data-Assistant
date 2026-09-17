@@ -6,7 +6,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.typing import ConfigType
 
-from .const import PLATFORMS
+from .const import CONF_FAILURE_MODE, FAILURE_KEEP_LAST, PLATFORMS
 from .coordinator import WebDataCoordinator
 from .frontend import async_register_frontend
 from .websocket import async_register_websocket_commands
@@ -27,9 +27,20 @@ async def async_setup_entry(
 ) -> bool:
     """Set up Web Data Assistant from a config entry."""
     coordinator = WebDataCoordinator(hass, entry)
-    await coordinator.async_config_entry_first_refresh()
-    entry.runtime_data = coordinator
 
+    failure_mode = entry.options.get(
+        CONF_FAILURE_MODE,
+        entry.data.get(CONF_FAILURE_MODE),
+    )
+    if failure_mode == FAILURE_KEEP_LAST:
+        # A retained-value source must still load its entities when the remote source
+        # is offline during Home Assistant startup. The sensors can then restore the
+        # previous state and replace it after the first successful coordinator update.
+        await coordinator.async_refresh()
+    else:
+        await coordinator.async_config_entry_first_refresh()
+
+    entry.runtime_data = coordinator
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True
 
