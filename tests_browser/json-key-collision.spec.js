@@ -36,7 +36,7 @@ test("different JSON paths that slugify alike receive unique entity keys", async
   const shadow = page.locator("web-data-assistant-panel").locator(":scope");
   await shadow.getByLabel("Source name").fill("Collision Test");
   await shadow.getByLabel("URL").fill("https://example.test/data.json");
-  await shadow.getByRole("button", { name: "Load source" }).click();
+  await shadow.getByRole("button", { name: "Load JSON" }).click();
   await shadow.locator(".json-row").filter({ hasText: "a-b" }).locator("input[type=checkbox]").check();
   await shadow.locator(".json-row").filter({ hasText: "a_b" }).locator("input[type=checkbox]").check();
   await shadow.getByRole("button", { name: "Create in Home Assistant" }).click();
