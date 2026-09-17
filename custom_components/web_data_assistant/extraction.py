@@ -10,6 +10,8 @@ from bs4 import BeautifulSoup, Tag
 from .const import MAX_HTML_MATCHES, MAX_JSON_DISCOVERY_VALUES, MAX_PREVIEW_LENGTH
 from .models import HtmlMatch, JsonCandidate
 
+_NON_VISIBLE_TEXT_TAGS = {"head", "script", "style", "template", "noscript"}
+
 
 def _preview(value: Any, limit: int = MAX_PREVIEW_LENGTH) -> str:
     """Return a compact human-readable value preview."""
@@ -108,14 +110,26 @@ def _normalise_text(value: str) -> str:
     return " ".join(value.split()).strip()
 
 
+def _tag_is_visible_text_candidate(tag: Tag) -> bool:
+    """Return whether an element can reasonably represent visible page text."""
+    if tag.name in _NON_VISIBLE_TEXT_TAGS:
+        return False
+    return not any(
+        isinstance(parent, Tag) and parent.name in _NON_VISIBLE_TEXT_TAGS
+        for parent in tag.parents
+    )
+
+
 def _tag_matches_text(tag: Tag, search_text: str) -> bool:
-    """Return whether a tag contains the requested text."""
+    """Return whether a visible candidate tag contains the requested text."""
+    if not _tag_is_visible_text_candidate(tag):
+        return False
     text = _normalise_text(tag.get_text(" ", strip=True))
     return search_text.casefold() in text.casefold()
 
 
 def _smallest_text_matches(soup: BeautifulSoup, search_text: str) -> list[Tag]:
-    """Find the smallest elements whose text contains the requested value."""
+    """Find the smallest visible elements whose text contains the requested value."""
     matches: list[Tag] = []
     for tag in soup.find_all(True):
         if not _tag_matches_text(tag, search_text):
