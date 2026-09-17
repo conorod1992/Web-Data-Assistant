@@ -30,11 +30,26 @@
           "verify_ssl": "Keep enabled unless you intentionally connect to a source with a self-signed certificate."
         }
       },
+      "json_mode": {
+        "title": "How do you want to use this JSON?",
+        "description": "Choose individual values for normal sensors, or retain the complete response as structured sensor attributes.",
+        "menu_options": {
+          "json_values": "Choose individual values",
+          "json_full": "Keep the full JSON response"
+        }
+      },
       "json_values": {
         "title": "Choose JSON values",
         "description": "Web Data Assistant found {count} selectable values in the response. Choose one or more values to create as sensors.",
         "data": {
           "selected_values": "Values to create"
+        }
+      },
+      "json_full": {
+        "title": "Keep the full JSON response",
+        "description": "This creates one sensor whose state is Loaded and stores the complete JSON response in its data attribute. This can be useful in templates and automations, but large or frequently changing responses can increase Recorder database usage.",
+        "data": {
+          "confirm": "I understand and want to keep the full response"
         }
       },
       "scrape_search": {
