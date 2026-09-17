@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import Any
+from urllib.parse import urlsplit
 
 import voluptuous as vol
 
@@ -12,6 +13,8 @@ from homeassistant.core import HomeAssistant
 
 from .client import WebDataClient, WebDataError
 from .const import (
+    CONF_ATTRIBUTE,
+    CONF_DEVICE_CLASS,
     CONF_ENTITIES,
     CONF_FAILURE_MODE,
     CONF_HEADERS,
@@ -25,7 +28,10 @@ from .const import (
     CONF_SELECTOR,
     CONF_SOURCE_NAME,
     CONF_SOURCE_TYPE,
+    CONF_STATE_CLASS,
+    CONF_UNIT,
     CONF_URL,
+    CONF_VALUE_TYPE,
     CONF_VERIFY_SSL,
     DATA_WEBSOCKET_REGISTERED,
     DEFAULT_FAILURE_MODE,
@@ -34,9 +40,15 @@ from .const import (
     DOMAIN,
     FAILURE_KEEP_LAST,
     FAILURE_UNAVAILABLE,
+    MAX_RESPONSE_BYTES,
     METHOD_GET,
+    METHOD_POST,
     SOURCE_JSON,
     SOURCE_SCRAPE,
+    VALUE_BOOLEAN,
+    VALUE_JSON,
+    VALUE_NUMBER,
+    VALUE_TEXT,
 )
 from .extraction import (
     extract_html_value,
@@ -47,13 +59,48 @@ from .extraction import (
 from .preview import build_html_preview
 
 
+def _http_url(value: str) -> str:
+    """Validate a user-supplied HTTP(S) URL."""
+    value = value.strip()
+    parts = urlsplit(value)
+    if parts.scheme.casefold() not in {"http", "https"} or not parts.netloc:
+        raise vol.Invalid("A valid HTTP or HTTPS URL is required")
+    return value
+
+
+def _non_empty_text(value: str) -> str:
+    """Return stripped text and reject empty input."""
+    value = value.strip()
+    if not value:
+        raise vol.Invalid("Value cannot be empty")
+    return value
+
+
 _COMMON_FIELDS: dict[Any, Any] = {
-    vol.Required(CONF_URL): str,
-    vol.Optional(CONF_METHOD, default=METHOD_GET): str,
-    vol.Optional(CONF_HEADERS): dict,
-    vol.Optional(CONF_PAYLOAD): str,
+    vol.Required(CONF_URL): _http_url,
+    vol.Optional(CONF_METHOD, default=METHOD_GET): vol.In([METHOD_GET, METHOD_POST]),
+    vol.Optional(CONF_HEADERS): {str: str},
+    vol.Optional(CONF_PAYLOAD): vol.All(str, vol.Length(max=MAX_RESPONSE_BYTES)),
     vol.Optional(CONF_VERIFY_SSL, default=DEFAULT_VERIFY_SSL): bool,
 }
+
+_ENTITY_SCHEMA = vol.Schema(
+    {
+        vol.Required("key"): vol.All(str, vol.Length(min=1, max=150)),
+        vol.Required("name"): vol.All(str, vol.Length(min=1, max=150)),
+        vol.Required(CONF_VALUE_TYPE, default=VALUE_TEXT): vol.In(
+            [VALUE_TEXT, VALUE_NUMBER, VALUE_BOOLEAN, VALUE_JSON]
+        ),
+        vol.Optional(CONF_PATH): vol.All(str, vol.Length(max=2000)),
+        vol.Optional(CONF_SELECTOR): vol.All(str, vol.Length(min=1, max=2000)),
+        vol.Optional(CONF_INDEX, default=0): vol.All(vol.Coerce(int), vol.Range(min=0)),
+        vol.Optional(CONF_ATTRIBUTE): vol.All(str, vol.Length(min=1, max=200)),
+        vol.Optional(CONF_UNIT): vol.All(str, vol.Length(max=100)),
+        vol.Optional(CONF_DEVICE_CLASS): vol.All(str, vol.Length(max=100)),
+        vol.Optional(CONF_STATE_CLASS): vol.All(str, vol.Length(max=100)),
+    },
+    extra=vol.PREVENT_EXTRA,
+)
 
 
 def _fetch_kwargs(msg: dict[str, Any]) -> dict[str, Any]:
@@ -156,7 +203,9 @@ async def websocket_preview_html(
 @websocket_api.websocket_command(
     {
         vol.Required("type"): f"{DOMAIN}/search_html",
-        vol.Required(CONF_SEARCH_TEXT): vol.All(str, vol.Length(min=1, max=500)),
+        vol.Required(CONF_SEARCH_TEXT): vol.All(
+            str, _non_empty_text, vol.Length(max=500)
+        ),
         **_COMMON_FIELDS,
     }
 )
@@ -203,9 +252,13 @@ async def websocket_search_html(
 @websocket_api.websocket_command(
     {
         vol.Required("type"): f"{DOMAIN}/create_source",
-        vol.Required(CONF_SOURCE_NAME): vol.All(str, vol.Length(min=1, max=100)),
+        vol.Required(CONF_SOURCE_NAME): vol.All(
+            str, _non_empty_text, vol.Length(max=100)
+        ),
         vol.Required(CONF_SOURCE_TYPE): vol.In([SOURCE_JSON, SOURCE_SCRAPE]),
-        vol.Required(CONF_ENTITIES): vol.All([dict], vol.Length(min=1, max=100)),
+        vol.Required(CONF_ENTITIES): vol.All(
+            [_ENTITY_SCHEMA], vol.Length(min=1, max=100)
+        ),
         vol.Optional(CONF_SCAN_INTERVAL, default=DEFAULT_SCAN_INTERVAL_MINUTES): vol.All(
             vol.Coerce(int), vol.Range(min=1, max=1440)
         ),
@@ -250,6 +303,7 @@ async def websocket_create_source(
                     response.text,
                     str(selector),
                     int(entity.get(CONF_INDEX, 0)),
+                    entity.get(CONF_ATTRIBUTE),
                 )
     except (WebDataError, KeyError, TypeError, ValueError) as err:
         connection.send_error(msg["id"], "validation_failed", str(err))
@@ -257,7 +311,7 @@ async def websocket_create_source(
 
     data: dict[str, Any] = {
         "_panel_create": True,
-        CONF_SOURCE_NAME: msg[CONF_SOURCE_NAME].strip(),
+        CONF_SOURCE_NAME: msg[CONF_SOURCE_NAME],
         CONF_SOURCE_TYPE: source_type,
         CONF_URL: msg[CONF_URL],
         CONF_METHOD: msg.get(CONF_METHOD, METHOD_GET),
