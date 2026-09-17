@@ -65,6 +65,7 @@ jobs:
           tests/test_integration.py
           tests/test_frontend_runtime.py
           tests/test_config_flow_runtime.py
+          tests/test_runtime_semantics.py
           --maxfail=1
 
   hassfest:
