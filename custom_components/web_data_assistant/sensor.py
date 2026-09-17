@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import datetime, timedelta
 from decimal import Decimal, InvalidOperation
-from typing import Any
+from typing import Any, override
 
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity, SensorStateClass
+from homeassistant.const import STATE_UNAVAILABLE, STATE_UNKNOWN
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
+from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import dt as dt_util
 
@@ -76,7 +78,11 @@ async def async_setup_entry(
     )
 
 
-class WebDataSensor(CoordinatorEntity[WebDataCoordinator], SensorEntity):
+class WebDataSensor(
+    CoordinatorEntity[WebDataCoordinator],
+    RestoreEntity,
+    SensorEntity,
+):
     """One value extracted from a Web Data Assistant source."""
 
     _attr_has_entity_name = True
@@ -91,6 +97,9 @@ class WebDataSensor(CoordinatorEntity[WebDataCoordinator], SensorEntity):
         super().__init__(coordinator)
         self._entry = entry
         self._config = config
+        self._restored_value: Any | None = None
+        self._has_restored_value = False
+        self._restored_last_successful_update: datetime | None = None
         self._attr_name = None if config.name == entry.title else config.name
         self._attr_unique_id = f"{entry.entry_id}_{config.key}"
         self._attr_native_unit_of_measurement = config.unit
@@ -113,11 +122,64 @@ class WebDataSensor(CoordinatorEntity[WebDataCoordinator], SensorEntity):
             except ValueError:
                 pass
 
+    def _live_value_available(self) -> bool:
+        """Return whether the coordinator currently retains this entity's value."""
+        return (
+            self.coordinator.data is not None
+            and self._config.key in self.coordinator.data.values
+        )
+
+    def _effective_raw_value(self) -> Any | None:
+        """Return live retained data first, then a restored startup value."""
+        if self._live_value_available():
+            return self.coordinator.value_for(self._config.key)
+        if self._has_restored_value:
+            return self._restored_value
+        return None
+
+    def _effective_last_successful_update(self) -> datetime | None:
+        """Return the timestamp associated with the retained value."""
+        if self._live_value_available():
+            return self.coordinator.last_successful_update
+        return self._restored_last_successful_update
+
+    @override
+    async def async_added_to_hass(self) -> None:
+        """Restore a retained value if startup could not reach the source."""
+        await super().async_added_to_hass()
+
+        failure_mode = self._entry.options.get(
+            CONF_FAILURE_MODE,
+            self._entry.data.get(CONF_FAILURE_MODE, FAILURE_UNAVAILABLE),
+        )
+        if failure_mode != FAILURE_KEEP_LAST or self._live_value_available():
+            return
+
+        last_state = await self.async_get_last_state()
+        if last_state is None or last_state.state in {STATE_UNKNOWN, STATE_UNAVAILABLE}:
+            return
+
+        if self._config.value_type == VALUE_JSON:
+            if "data" not in last_state.attributes:
+                return
+            self._restored_value = last_state.attributes["data"]
+        else:
+            self._restored_value = last_state.state
+        self._has_restored_value = True
+
+        restored_timestamp = last_state.attributes.get("last_successful_update")
+        if isinstance(restored_timestamp, str):
+            self._restored_last_successful_update = dt_util.parse_datetime(
+                restored_timestamp
+            )
+        if self._restored_last_successful_update is None:
+            self._restored_last_successful_update = last_state.last_updated
+
     @property
     def native_value(self) -> Any:
-        """Return the latest extracted state."""
+        """Return the latest extracted or restored state."""
         return _coerce_value(
-            self.coordinator.value_for(self._config.key),
+            self._effective_raw_value(),
             self._config.value_type,
         )
 
@@ -128,7 +190,7 @@ class WebDataSensor(CoordinatorEntity[WebDataCoordinator], SensorEntity):
             return False
 
         if self.coordinator.last_update_success:
-            return self._config.key in self.coordinator.data.values
+            return self._live_value_available()
 
         failure_mode = self._entry.options.get(
             CONF_FAILURE_MODE,
@@ -136,7 +198,7 @@ class WebDataSensor(CoordinatorEntity[WebDataCoordinator], SensorEntity):
         )
         if failure_mode != FAILURE_KEEP_LAST:
             return False
-        if self.coordinator.data is None or self._config.key not in self.coordinator.data.values:
+        if not self._live_value_available() and not self._has_restored_value:
             return False
 
         max_stale = self._entry.options.get(
@@ -145,10 +207,12 @@ class WebDataSensor(CoordinatorEntity[WebDataCoordinator], SensorEntity):
         )
         if not max_stale:
             return True
-        if self.coordinator.last_successful_update is None:
+
+        last_successful_update = self._effective_last_successful_update()
+        if last_successful_update is None:
             return False
 
-        age = dt_util.utcnow() - self.coordinator.last_successful_update
+        age = dt_util.utcnow() - last_successful_update
         return age <= timedelta(minutes=int(max_stale))
 
     @property
@@ -158,9 +222,11 @@ class WebDataSensor(CoordinatorEntity[WebDataCoordinator], SensorEntity):
             "source_available": self.coordinator.last_update_success,
         }
         if self._config.value_type == VALUE_JSON:
-            attributes["data"] = self.coordinator.value_for(self._config.key)
-        if self.coordinator.last_successful_update is not None:
-            attributes["last_successful_update"] = self.coordinator.last_successful_update.isoformat()
+            attributes["data"] = self._effective_raw_value()
+
+        last_successful_update = self._effective_last_successful_update()
+        if last_successful_update is not None:
+            attributes["last_successful_update"] = last_successful_update.isoformat()
         if self.coordinator.last_source_error:
             attributes["source_error"] = self.coordinator.last_source_error
         if extraction_error := self.coordinator.extraction_error_for(self._config.key):
