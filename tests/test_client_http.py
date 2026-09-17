@@ -290,3 +290,24 @@ async def test_client_falls_back_when_charset_is_unknown(
     assert response.status == 200
     assert response.text == "Café"
     assert "charset=x-not-a-real-charset" in response.content_type
+
+
+async def test_client_sanitizes_refused_connection_error(
+    hass: HomeAssistant,
+    aiohttp_server,
+    socket_enabled,
+) -> None:
+    """Never surface a token-bearing URL when a real connection is refused."""
+    app = web.Application()
+    server = await aiohttp_server(app)
+    url = str(server.make_url("/private?token=super-secret-token"))
+    await server.close()
+
+    with pytest.raises(WebDataConnectionError) as exc_info:
+        await WebDataClient(hass).async_fetch(url)
+
+    message = str(exc_info.value)
+    assert "super-secret-token" not in message
+    assert "/private" not in message
+    assert "The source could not be reached" in message
+    assert "ClientConnectorError" in message
