@@ -12,13 +12,11 @@ async function mountPanel(page) {
   await page.evaluate(() => {
     const panel = document.querySelector("web-data-assistant-panel");
     panel.hass = {
-      connection: {
-        sendMessagePromise: async (message) => {
-          if (message.type === "web_data_assistant/list_sources") {
-            return { sources: [] };
-          }
-          throw new Error(`Unexpected WebSocket call: ${message.type}`);
-        },
+      callWS: async (message) => {
+        if (message.type === "web_data_assistant/list_sources") {
+          return { sources: [] };
+        }
+        throw new Error(`Unexpected WebSocket call: ${message.type}`);
       },
     };
   });
@@ -37,6 +35,8 @@ test("panel loads cleanly in Chromium", async ({ page }) => {
   const panel = page.locator("web-data-assistant-panel");
   const shadow = panel.locator(":scope");
   await expect(shadow.getByRole("heading", { name: "Web Data Assistant", level: 1 })).toBeVisible();
+  await expect(shadow.getByRole("heading", { name: "Configured sources", level: 2 })).toBeVisible();
+  await expect(shadow.getByText("No Web Data Assistant sources have been created yet.")).toBeVisible();
   await expect(shadow.getByRole("heading", { name: "Create a source", level: 2 })).toBeVisible();
   await expect(shadow.getByRole("button", { name: "Load source" })).toBeVisible();
 
