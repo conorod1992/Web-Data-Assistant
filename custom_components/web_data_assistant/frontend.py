@@ -9,6 +9,7 @@ from homeassistant.components.http import StaticPathConfig
 from homeassistant.core import HomeAssistant
 
 from .const import DATA_FRONTEND_REGISTERED, DOMAIN
+from .management import async_register_management_commands
 
 FRONTEND_DIR = Path(__file__).parent / "frontend"
 FRONTEND_URL = f"/{DOMAIN}/frontend"
@@ -18,6 +19,8 @@ PANEL_ELEMENT = "web-data-assistant-panel"
 
 async def async_register_frontend(hass: HomeAssistant) -> None:
     """Serve and register the Web Data Assistant management panel once."""
+    async_register_management_commands(hass)
+
     domain_data = hass.data.setdefault(DOMAIN, {})
     if domain_data.get(DATA_FRONTEND_REGISTERED):
         return
