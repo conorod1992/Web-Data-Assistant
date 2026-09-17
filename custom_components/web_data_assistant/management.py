@@ -38,6 +38,18 @@ def _safe_display_url(value: str) -> str:
     return urlunsplit((parts.scheme, netloc, parts.path or "/", "", ""))
 
 
+def _find_entry(hass: HomeAssistant, entry_id: str) -> ConfigEntry | None:
+    """Return one Web Data Assistant config entry by ID."""
+    return next(
+        (
+            entry
+            for entry in hass.config_entries.async_entries(DOMAIN)
+            if entry.entry_id == entry_id
+        ),
+        None,
+    )
+
+
 def _entry_snapshot(entry: ConfigEntry) -> dict[str, Any]:
     """Return non-sensitive management metadata for one source entry."""
     coordinator: WebDataCoordinator | None = None
@@ -111,14 +123,7 @@ async def websocket_refresh_source(
     msg: dict[str, Any],
 ) -> None:
     """Request an immediate refresh for one loaded source."""
-    entry = next(
-        (
-            candidate
-            for candidate in hass.config_entries.async_entries(DOMAIN)
-            if candidate.entry_id == msg["entry_id"]
-        ),
-        None,
-    )
+    entry = _find_entry(hass, msg["entry_id"])
     if entry is None:
         connection.send_error(msg["id"], "not_found", "Source was not found")
         return
@@ -135,6 +140,29 @@ async def websocket_refresh_source(
     connection.send_result(msg["id"], _entry_snapshot(entry))
 
 
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/delete_source",
+        vol.Required("entry_id"): str,
+    }
+)
+@websocket_api.require_admin
+@websocket_api.async_response
+async def websocket_delete_source(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Remove one source through Home Assistant's config-entry lifecycle."""
+    entry = _find_entry(hass, msg["entry_id"])
+    if entry is None:
+        connection.send_error(msg["id"], "not_found", "Source was not found")
+        return
+
+    await hass.config_entries.async_remove(entry.entry_id)
+    connection.send_result(msg["id"], {"entry_id": entry.entry_id})
+
+
 def async_register_management_commands(hass: HomeAssistant) -> None:
     """Register source-management WebSocket commands once."""
     domain_data = hass.data.setdefault(DOMAIN, {})
@@ -143,4 +171,5 @@ def async_register_management_commands(hass: HomeAssistant) -> None:
 
     websocket_api.async_register_command(hass, websocket_list_sources)
     websocket_api.async_register_command(hass, websocket_refresh_source)
+    websocket_api.async_register_command(hass, websocket_delete_source)
     domain_data[DATA_MANAGEMENT_REGISTERED] = True
