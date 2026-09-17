@@ -4,15 +4,18 @@ from __future__ import annotations
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.typing import ConfigType
 
-from .const import CONF_FAILURE_MODE, FAILURE_KEEP_LAST, PLATFORMS
+from .const import CONF_FAILURE_MODE, DOMAIN, FAILURE_KEEP_LAST, PLATFORMS
 from .coordinator import WebDataCoordinator
 from .frontend import async_register_frontend
 from .management import async_register_management_commands
 from .websocket import async_register_websocket_commands
 
 type WebDataAssistantConfigEntry = ConfigEntry[WebDataCoordinator]
+
+CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
