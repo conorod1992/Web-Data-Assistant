@@ -35,3 +35,13 @@ jobs:
 
       - name: Check frontend JavaScript syntax
         run: node --check custom_components/web_data_assistant/frontend/web-data-assistant-panel.js
+
+  hassfest:
+    name: Home Assistant hassfest
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Validate integration structure
+        uses: home-assistant/actions/hassfest@master
