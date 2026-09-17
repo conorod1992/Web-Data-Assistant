@@ -158,6 +158,42 @@ async def test_keep_last_survives_runtime_source_outage(hass: HomeAssistant) -> 
     assert state.attributes["source_error"] == "The request timed out"
 
 
+async def test_source_recovers_cleanly_after_runtime_outage(hass: HomeAssistant) -> None:
+    """Clear source-error state and publish fresh data after connectivity returns."""
+    entry = _json_entry(FAILURE_KEEP_LAST)
+    entry.add_to_hass(hass)
+    fetch = AsyncMock(return_value=_response(14.6))
+
+    with patch(
+        "custom_components.web_data_assistant.client.WebDataClient.async_fetch",
+        new=fetch,
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+        entity_id = _entity_id(hass, entry)
+
+        fetch.side_effect = WebDataConnectionError("The request timed out")
+        await entry.runtime_data.async_request_refresh()
+        await hass.async_block_till_done()
+        failed = hass.states.get(entity_id)
+        assert failed is not None
+        assert failed.state == "14.6"
+        assert failed.attributes["source_available"] is False
+        assert failed.attributes["source_error"] == "The request timed out"
+
+        fetch.side_effect = None
+        fetch.return_value = _response(15.2)
+        await entry.runtime_data.async_request_refresh()
+        await hass.async_block_till_done()
+
+    recovered = hass.states.get(entity_id)
+    assert recovered is not None
+    assert recovered.state == "15.2"
+    assert recovered.attributes["source_available"] is True
+    assert "source_error" not in recovered.attributes
+    assert fetch.await_count == 3
+
+
 async def test_keep_last_restores_state_when_source_is_offline_at_startup(
     hass: HomeAssistant,
 ) -> None:
