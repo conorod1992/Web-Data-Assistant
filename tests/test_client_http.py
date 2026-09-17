@@ -123,6 +123,34 @@ async def test_client_rejects_malformed_json_response(
         )
 
 
+async def test_client_rejects_non_standard_json_constants(
+    hass: HomeAssistant,
+    aiohttp_server,
+    socket_enabled,
+) -> None:
+    """Reject NaN/Infinity values that are not valid JSON numbers."""
+    app = web.Application()
+
+    async def non_standard(_request: web.Request) -> web.Response:
+        return web.Response(
+            status=200,
+            text='{"temperature": NaN}',
+            content_type="application/json",
+        )
+
+    app.router.add_get("/non-standard", non_standard)
+    server = await aiohttp_server(app)
+
+    with pytest.raises(
+        WebDataResponseError,
+        match="responded successfully but did not return valid JSON",
+    ):
+        await WebDataClient(hass).async_fetch(
+            str(server.make_url("/non-standard")),
+            parse_json=True,
+        )
+
+
 async def test_client_rejects_oversized_content_length(
     hass: HomeAssistant,
     aiohttp_server,
