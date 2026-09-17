@@ -84,6 +84,9 @@ async def test_refresh_source_reports_missing_entry(
     hass_ws_client,
 ) -> None:
     """Return a stable not_found error when dashboard state references a removed source."""
+    assert await async_setup_component(hass, DOMAIN, {})
+    await hass.async_block_till_done()
+
     client = await hass_ws_client(hass)
     await client.send_json(
         {
