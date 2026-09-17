@@ -78,3 +78,29 @@ test("source dashboard distinguishes unavailable, retained and extraction-degrad
   await expect(degraded.locator(".health")).toContainText("1 extraction issue");
   await expect(degraded).toContainText("1 extraction issue");
 });
+
+test("expired keep-last source is no longer labelled retained", async ({ page }) => {
+  await mountWithSources(page, [
+    {
+      entry_id: "expired",
+      title: "Expired Retained Source",
+      state: "loaded",
+      source_type: "json",
+      url: "https://example.test/expired",
+      entity_count: 1,
+      scan_interval: 5,
+      failure_mode: "keep_last",
+      max_stale_minutes: 30,
+      source_available: false,
+      extraction_error_count: 0,
+      last_successful_update: "2000-01-01T00:00:00+00:00",
+    },
+  ]);
+
+  const shadow = page.locator("web-data-assistant-panel").locator(":scope");
+  const expired = shadow.locator(".source-card").filter({ hasText: "Expired Retained Source" });
+
+  await expect(expired.locator(".health")).toHaveClass(/unavailable/);
+  await expect(expired.locator(".health")).toContainText("Source unavailable");
+  await expect(expired.locator(".health")).not.toContainText("retained");
+});
