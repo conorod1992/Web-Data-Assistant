@@ -14,9 +14,12 @@ Web Data Assistant starts with the data you want rather than the technical expre
 2. Web Data Assistant fetches the real response through Home Assistant.
 3. Browse and search the scalar values found in the JSON document.
 4. Select one or more values to create as sensors.
-5. The selected values share one HTTP request on each refresh.
+5. Review friendly sensor names and optional units before saving.
+6. The selected values share one HTTP request on each refresh.
 
 JSON locations are stored internally as RFC 6901 JSON Pointers, so unusual object keys do not require the user to build or escape a template expression.
+
+Guided discovery is intentionally capped at 250 scalar values to keep very large responses responsive. The preview API reports when additional values were omitted rather than treating the capped result as complete.
 
 A source can alternatively keep the complete JSON response in a sensor attribute. This is useful for later templates or automations, but the UI warns that large or frequently changing attributes can increase Recorder database usage.
 
@@ -26,7 +29,10 @@ A source can alternatively keep the complete JSON response in a sensor attribute
 2. Web Data Assistant creates a sanitized, script-free preview of the fetched HTML.
 3. Either click the wanted element directly or enter text/value that is currently visible on the page.
 4. If the text occurs in multiple specific elements, choose the correct match using its surrounding context.
-5. Web Data Assistant generates and stores the CSS selector and match index internally.
+5. Optionally give the resulting sensor a unit.
+6. Web Data Assistant generates and stores the CSS selector and match index internally.
+
+Text search ignores non-visible document content such as scripts, styles, templates and noscript blocks so the guided search remains aligned with what the user can actually see.
 
 The generated selector/index are shown only under advanced extraction details. They are validated again against a fresh response before the source is created.
 
@@ -39,11 +45,13 @@ Each source can choose what its entities should do when the website or API canno
 - **Mark sensors unavailable** — the traditional Home Assistant-style behaviour.
 - **Keep the last known value** — retain the most recent successful value during a temporary source outage.
 
-When keeping the last value, an optional maximum stale age can eventually make the entity unavailable if successful updates do not resume.
+Retained values survive Home Assistant restarts. If Home Assistant starts while the remote source is already offline, the entities can restore their previous successful state and replace it once live updates resume.
+
+When keeping the last value, an optional maximum stale age can eventually make the entity unavailable if successful updates do not resume. The original last-success timestamp is restored too, so the stale-age limit continues to work correctly across restarts.
 
 A source-connection failure and an extraction failure are deliberately treated differently. A temporary HTTP/DNS/timeout failure may retain the previous value when configured to do so. If the page loads but the configured selector or JSON path no longer exists, the affected entity becomes unavailable instead of silently presenting old data as current.
 
-Sensors expose concise source-health information such as whether the latest source refresh succeeded and when the last successful update occurred.
+Sensors expose concise source-health information such as whether the latest source refresh succeeded and when the last successful update occurred. Connection errors are intentionally sanitized so request URLs or credentials are not exposed through state attributes.
 
 ## Home Assistant UI
 
@@ -54,7 +62,15 @@ Web Data Assistant has two setup surfaces:
 
 Starting **Add Integration → Web Data Assistant** registers the guided panel immediately, so the visual workflow can be used before the first data source has been created.
 
+The panel also includes a configured-source dashboard showing source type, privacy-safe endpoint, update interval, source health, last successful update and extraction-health information. Loaded sources can be refreshed manually from the panel.
+
 Sensors created from the same source are grouped under one Home Assistant service device.
+
+## Long values
+
+Home Assistant limits entity states to 255 characters. If a scraped or API text value exceeds that limit, Web Data Assistant publishes a safe shortened state and preserves the complete text in the `full_value` attribute. Retained-state restoration uses the complete value, not the shortened state.
+
+Full JSON responses are handled separately: the sensor state is `Loaded` and the structured response is stored in the `data` attribute.
 
 ## Request support
 
@@ -67,6 +83,7 @@ The current v1 foundation supports:
 - configurable polling interval
 - a 20-second request timeout
 - a 2 MB response-size safety limit
+- bounded/chunk-aware response reading
 
 ## Deliberate v1 limits
 
@@ -87,6 +104,8 @@ Repeated-container detection remains a promising later enhancement, but the init
 
 Diagnostics intentionally omit request header values, request bodies, current source values, URL credentials, query parameters and fragments. Extraction definitions and source-health metadata remain available to help diagnose failures.
 
+The management panel similarly receives privacy-safe endpoint strings rather than the full stored URL, so query-string credentials are not echoed into the browser UI.
+
 ## Repository layout
 
 ```text
@@ -101,6 +120,7 @@ custom_components/web_data_assistant/
 ├── frontend.py
 ├── frontend/
 │   └── web-data-assistant-panel.js
+├── management.py
 ├── manifest.json
 ├── models.py
 ├── preview.py
@@ -111,8 +131,10 @@ custom_components/web_data_assistant/
 └── websocket.py
 ```
 
+## Validation
+
+The repository intentionally does not include an automated behavioral test suite yet. GitHub Actions currently performs lightweight Python/JSON/JavaScript syntax validation plus Home Assistant hassfest validation so malformed metadata, translations and integration structure are caught early.
+
 ## Installation
 
-The integration already contains HACS metadata, but it has not yet been prepared as a production release. For development, place `custom_components/web_data_assistant` in the Home Assistant `custom_components` directory and restart Home Assistant.
-
-No automated test suite has been added at this stage.
+The integration contains HACS metadata, but it has not yet been prepared as a production release. For development, place `custom_components/web_data_assistant` in the Home Assistant `custom_components` directory and restart Home Assistant.
