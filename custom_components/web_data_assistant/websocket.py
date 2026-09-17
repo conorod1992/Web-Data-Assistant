@@ -201,7 +201,11 @@ async def websocket_preview_html(
             **_fetch_kwargs(msg),
             parse_json=False,
         )
-        preview_html, elements = build_html_preview(response.text, msg[CONF_URL])
+        preview_html, elements = await hass.async_add_executor_job(
+            build_html_preview,
+            response.text,
+            msg[CONF_URL],
+        )
     except WebDataError as err:
         connection.send_error(msg["id"], "fetch_failed", str(err))
         return
@@ -247,7 +251,11 @@ async def websocket_search_html(
             **_fetch_kwargs(msg),
             parse_json=False,
         )
-        matches = find_html_text_matches(response.text, msg[CONF_SEARCH_TEXT])
+        matches = await hass.async_add_executor_job(
+            find_html_text_matches,
+            response.text,
+            msg[CONF_SEARCH_TEXT],
+        )
     except WebDataError as err:
         connection.send_error(msg["id"], "fetch_failed", str(err))
         return
@@ -322,7 +330,8 @@ async def websocket_create_source(
             if source_type == SOURCE_JSON:
                 resolve_json_pointer(response.json_data, str(entity[CONF_PATH]))
             else:
-                extract_html_value(
+                await hass.async_add_executor_job(
+                    extract_html_value,
                     response.text,
                     str(entity[CONF_SELECTOR]),
                     int(entity.get(CONF_INDEX, 0)),
