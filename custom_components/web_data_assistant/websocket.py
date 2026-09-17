@@ -14,11 +14,13 @@ from homeassistant.core import HomeAssistant
 from .client import WebDataClient, WebDataError
 from .const import (
     CONF_ATTRIBUTE,
+    CONF_ATTRIBUTES,
     CONF_DEVICE_CLASS,
     CONF_ENTITIES,
     CONF_FAILURE_MODE,
     CONF_HEADERS,
     CONF_INDEX,
+    CONF_LONG_TEXT_POLICY,
     CONF_MAX_STALE_MINUTES,
     CONF_METHOD,
     CONF_PATH,
@@ -35,11 +37,15 @@ from .const import (
     CONF_VERIFY_SSL,
     DATA_WEBSOCKET_REGISTERED,
     DEFAULT_FAILURE_MODE,
+    DEFAULT_LONG_TEXT_POLICY,
     DEFAULT_SCAN_INTERVAL_MINUTES,
     DEFAULT_VERIFY_SSL,
     DOMAIN,
     FAILURE_KEEP_LAST,
     FAILURE_UNAVAILABLE,
+    LONG_TEXT_ATTRIBUTE_ONLY,
+    LONG_TEXT_TRUNCATE,
+    LONG_TEXT_UNAVAILABLE,
     MAX_RESPONSE_BYTES,
     METHOD_GET,
     METHOD_POST,
@@ -59,6 +65,12 @@ from .extraction import (
 from .models import WebDataEntityConfig
 from .preview import build_html_preview
 
+_LONG_TEXT_POLICIES = [
+    LONG_TEXT_TRUNCATE,
+    LONG_TEXT_ATTRIBUTE_ONLY,
+    LONG_TEXT_UNAVAILABLE,
+]
+
 
 def _http_url(value: str) -> str:
     """Validate a user-supplied HTTP(S) URL."""
@@ -77,6 +89,17 @@ def _non_empty_text(value: str) -> str:
     return value
 
 
+def _escape_pointer_part(part: str) -> str:
+    """Escape one RFC 6901 JSON Pointer component for preview metadata."""
+    return part.replace("~", "~0").replace("/", "~1")
+
+
+def _compact_preview(value: Any, limit: int = 180) -> str:
+    """Return a short preview for a top-level JSON value."""
+    text = " ".join(str(value).replace("\n", " ").split())
+    return text if len(text) <= limit else f"{text[: limit - 1]}…"
+
+
 _COMMON_FIELDS: dict[Any, Any] = {
     vol.Required(CONF_URL): _http_url,
     vol.Optional(CONF_METHOD, default=METHOD_GET): vol.In([METHOD_GET, METHOD_POST]),
@@ -93,12 +116,18 @@ _ENTITY_SCHEMA = vol.Schema(
             [VALUE_TEXT, VALUE_NUMBER, VALUE_BOOLEAN, VALUE_JSON]
         ),
         vol.Optional(CONF_PATH): vol.All(str, vol.Length(max=2000)),
+        vol.Optional(CONF_ATTRIBUTES): {
+            vol.All(str, _non_empty_text, vol.Length(max=150)): vol.All(
+                str, vol.Length(max=2000)
+            )
+        },
         vol.Optional(CONF_SELECTOR): vol.All(str, vol.Length(min=1, max=2000)),
         vol.Optional(CONF_INDEX, default=0): vol.All(vol.Coerce(int), vol.Range(min=0)),
         vol.Optional(CONF_ATTRIBUTE): vol.All(str, vol.Length(min=1, max=200)),
         vol.Optional(CONF_UNIT): vol.All(str, vol.Length(max=100)),
         vol.Optional(CONF_DEVICE_CLASS): vol.All(str, vol.Length(max=100)),
         vol.Optional(CONF_STATE_CLASS): vol.All(str, vol.Length(max=100)),
+        vol.Optional(CONF_LONG_TEXT_POLICY): vol.In(_LONG_TEXT_POLICIES),
     },
     extra=vol.PREVENT_EXTRA,
 )
@@ -122,8 +151,12 @@ def _validate_entity_definitions(source_type: str, entities: list[dict[str, Any]
 
     for entity in entities:
         if source_type == SOURCE_JSON:
-            if CONF_PATH not in entity:
-                raise ValueError("A selected JSON value is missing its path")
+            if CONF_PATH not in entity and not entity.get(CONF_ATTRIBUTES):
+                raise ValueError(
+                    "A JSON sensor needs a state path, one or more attributes, or both"
+                )
+            if entity.get(CONF_VALUE_TYPE) == VALUE_JSON and CONF_PATH not in entity:
+                raise ValueError("A full JSON sensor needs a JSON state path")
             if CONF_SELECTOR in entity:
                 raise ValueError("JSON sensors cannot contain an HTML selector")
         else:
@@ -131,6 +164,8 @@ def _validate_entity_definitions(source_type: str, entities: list[dict[str, Any]
                 raise ValueError("A selected page value is missing its selector")
             if CONF_PATH in entity:
                 raise ValueError("Web page sensors cannot contain a JSON path")
+            if entity.get(CONF_ATTRIBUTES):
+                raise ValueError("Web page sensors cannot contain JSON attributes")
             if entity.get(CONF_VALUE_TYPE) == VALUE_JSON:
                 raise ValueError("Web page sensors cannot use the full JSON value type")
 
@@ -170,6 +205,19 @@ async def websocket_preview_json(
         }
         for candidate in discovered
     ]
+
+    root_fields: list[dict[str, Any]] = []
+    if isinstance(response.json_data, dict):
+        root_fields = [
+            {
+                "name": str(name),
+                "path": f"/{_escape_pointer_part(str(name))}",
+                "preview": _compact_preview(value),
+                "value_type": type(value).__name__,
+            }
+            for name, value in response.json_data.items()
+        ]
+
     connection.send_result(
         msg["id"],
         {
@@ -177,6 +225,8 @@ async def websocket_preview_json(
             "content_type": response.content_type,
             "values": candidates,
             "truncated": truncated,
+            "root_type": type(response.json_data).__name__,
+            "root_fields": root_fields,
         },
     )
 
@@ -194,7 +244,7 @@ async def websocket_preview_html(
     connection: websocket_api.ActiveConnection,
     msg: dict[str, Any],
 ) -> None:
-    """Fetch HTML and return a sanitised, clickable preview document."""
+    """Fetch HTML and return a sanitised preview document for compatibility."""
     client = WebDataClient(hass)
     try:
         response = await client.async_fetch(
@@ -300,6 +350,9 @@ async def websocket_search_html(
         vol.Optional(CONF_MAX_STALE_MINUTES): vol.All(
             vol.Coerce(int), vol.Range(min=1, max=525600)
         ),
+        vol.Optional(CONF_LONG_TEXT_POLICY, default=DEFAULT_LONG_TEXT_POLICY): vol.In(
+            _LONG_TEXT_POLICIES
+        ),
         **_COMMON_FIELDS,
     }
 )
@@ -329,7 +382,10 @@ async def websocket_create_source(
         )
         if source_type == SOURCE_JSON:
             for entity in entities:
-                resolve_json_pointer(response.json_data, str(entity[CONF_PATH]))
+                if CONF_PATH in entity:
+                    resolve_json_pointer(response.json_data, str(entity[CONF_PATH]))
+                for path in entity.get(CONF_ATTRIBUTES, {}).values():
+                    resolve_json_pointer(response.json_data, str(path))
         else:
             entity_configs = [WebDataEntityConfig.from_dict(entity) for entity in entities]
             validation_result = await hass.async_add_executor_job(
@@ -356,6 +412,9 @@ async def websocket_create_source(
         CONF_VERIFY_SSL: msg.get(CONF_VERIFY_SSL, DEFAULT_VERIFY_SSL),
         CONF_SCAN_INTERVAL: msg.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL_MINUTES),
         CONF_FAILURE_MODE: msg.get(CONF_FAILURE_MODE, DEFAULT_FAILURE_MODE),
+        CONF_LONG_TEXT_POLICY: msg.get(
+            CONF_LONG_TEXT_POLICY, DEFAULT_LONG_TEXT_POLICY
+        ),
         CONF_ENTITIES: entities,
     }
     if payload := msg.get(CONF_PAYLOAD):
