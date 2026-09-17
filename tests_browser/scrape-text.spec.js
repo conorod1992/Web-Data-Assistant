@@ -89,3 +89,52 @@ test("guided scrape text search disambiguates multiple visible matches", async (
     },
   ]);
 });
+
+test("no-match scrape text search keeps the loaded preview ready for another search", async ({ page }) => {
+  await page.setContent("<web-data-assistant-panel></web-data-assistant-panel>");
+  await page.addScriptTag({ path: PANEL_SCRIPT });
+  await page.evaluate(() => {
+    window.__searchCount = 0;
+    const panel = document.querySelector("web-data-assistant-panel");
+    panel.hass = {
+      callWS: async (message) => {
+        if (message.type === "web_data_assistant/list_sources") return { sources: [] };
+        if (message.type === "web_data_assistant/preview_html") {
+          return {
+            status: 200,
+            content_type: "text/html",
+            html: '<!doctype html><html><body><span data-wda-preview-id="temp">14°C</span></body></html>',
+            elements: {},
+          };
+        }
+        if (message.type === "web_data_assistant/search_html") {
+          window.__searchCount += 1;
+          if (window.__searchCount === 1) return { matches: [] };
+          return {
+            matches: [{ selector: ".temperature", index: 0, text: "14°C", context: "Carlow 14°C", tag: "span" }],
+          };
+        }
+        throw new Error(`Unexpected WebSocket call: ${message.type}`);
+      },
+    };
+  });
+
+  const shadow = page.locator("web-data-assistant-panel").locator(":scope");
+  await shadow.getByRole("button", { name: /Web page/ }).click();
+  await shadow.getByLabel("Source name").fill("Carlow Temperature");
+  await shadow.getByLabel("URL").fill("https://example.test/weather");
+  await shadow.getByRole("button", { name: "Load source" }).click();
+
+  await expect(shadow.locator("iframe#preview")).toBeVisible();
+  await shadow.getByLabel("Current text or value").fill("99°C");
+  await shadow.getByRole("button", { name: "Find text" }).click();
+  await expect(shadow.getByText("No matching page element was found for that text.")).toBeVisible();
+  await expect(shadow.locator("iframe#preview")).toBeVisible();
+  await expect(shadow.getByRole("button", { name: "Create in Home Assistant" })).toBeDisabled();
+
+  await shadow.getByLabel("Current text or value").fill("14°C");
+  await shadow.getByRole("button", { name: "Find text" }).click();
+  await expect(shadow.getByText("Found 1 specific match.")).toBeVisible();
+  await expect(shadow.getByRole("heading", { name: "Selected value" })).toBeVisible();
+  await expect(shadow.getByRole("button", { name: "Create in Home Assistant" })).toBeEnabled();
+});
