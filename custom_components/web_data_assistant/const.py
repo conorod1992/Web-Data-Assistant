@@ -15,8 +15,10 @@ CONF_VERIFY_SSL = "verify_ssl"
 CONF_SCAN_INTERVAL = "scan_interval"
 CONF_FAILURE_MODE = "failure_mode"
 CONF_MAX_STALE_MINUTES = "max_stale_minutes"
+CONF_LONG_TEXT_POLICY = "long_text_policy"
 CONF_ENTITIES = "entities"
 CONF_PATH = "path"
+CONF_ATTRIBUTES = "attributes"
 CONF_SELECTOR = "selector"
 CONF_INDEX = "index"
 CONF_ATTRIBUTE = "attribute"
@@ -34,6 +36,11 @@ METHOD_POST = "POST"
 
 FAILURE_UNAVAILABLE = "unavailable"
 FAILURE_KEEP_LAST = "keep_last"
+
+LONG_TEXT_TRUNCATE = "truncate"
+LONG_TEXT_ATTRIBUTE_ONLY = "attribute_only"
+LONG_TEXT_UNAVAILABLE = "unavailable"
+DEFAULT_LONG_TEXT_POLICY = LONG_TEXT_TRUNCATE
 
 VALUE_TEXT = "text"
 VALUE_NUMBER = "number"
