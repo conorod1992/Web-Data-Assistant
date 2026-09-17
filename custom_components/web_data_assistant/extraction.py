@@ -28,19 +28,11 @@ def _unescape_pointer_part(part: str) -> str:
     return part.replace("~1", "/").replace("~0", "~")
 
 
-def iter_json_candidates(data: Any) -> Iterator[JsonCandidate]:
-    """Yield scalar values in a JSON response with stable JSON Pointer paths."""
-    yielded = 0
-
+def _iter_json_scalars(data: Any) -> Iterator[JsonCandidate]:
+    """Yield every scalar value in a JSON document without applying a UI cap."""
     def walk(value: Any, pointer: str, display: str) -> Iterator[JsonCandidate]:
-        nonlocal yielded
-        if yielded >= MAX_JSON_DISCOVERY_VALUES:
-            return
-
         if isinstance(value, dict):
             for key, child in value.items():
-                if yielded >= MAX_JSON_DISCOVERY_VALUES:
-                    return
                 part = _escape_pointer_part(str(key))
                 child_pointer = f"{pointer}/{part}"
                 child_display = f"{display}.{key}" if display else str(key)
@@ -49,14 +41,11 @@ def iter_json_candidates(data: Any) -> Iterator[JsonCandidate]:
 
         if isinstance(value, list):
             for index, child in enumerate(value):
-                if yielded >= MAX_JSON_DISCOVERY_VALUES:
-                    return
                 child_pointer = f"{pointer}/{index}"
                 child_display = f"{display}[{index}]" if display else f"[{index}]"
                 yield from walk(child, child_pointer, child_display)
             return
 
-        yielded += 1
         yield JsonCandidate(
             path=pointer or "",
             value=value,
@@ -65,6 +54,29 @@ def iter_json_candidates(data: Any) -> Iterator[JsonCandidate]:
         )
 
     yield from walk(data, "", "")
+
+
+def discover_json_candidates(data: Any) -> tuple[list[JsonCandidate], bool]:
+    """Return capped JSON candidates plus whether additional values were omitted."""
+    candidates: list[JsonCandidate] = []
+    iterator = _iter_json_scalars(data)
+    for _ in range(MAX_JSON_DISCOVERY_VALUES + 1):
+        try:
+            candidate = next(iterator)
+        except StopIteration:
+            break
+        candidates.append(candidate)
+
+    truncated = len(candidates) > MAX_JSON_DISCOVERY_VALUES
+    if truncated:
+        candidates.pop()
+    return candidates, truncated
+
+
+def iter_json_candidates(data: Any) -> Iterator[JsonCandidate]:
+    """Yield capped scalar values in a JSON response with stable JSON Pointer paths."""
+    candidates, _ = discover_json_candidates(data)
+    yield from candidates
 
 
 def resolve_json_pointer(data: Any, pointer: str) -> Any:
