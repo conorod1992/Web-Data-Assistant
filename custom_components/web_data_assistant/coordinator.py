@@ -25,7 +25,7 @@ from .const import (
     METHOD_GET,
     SOURCE_JSON,
 )
-from .extraction import extract_html_value, resolve_json_pointer
+from .extraction import extract_html_entities, resolve_json_pointer
 from .models import ExtractionResult, WebDataEntityConfig
 
 _LOGGER = logging.getLogger(__name__)
@@ -50,6 +50,7 @@ class WebDataCoordinator(DataUpdateCoordinator[ExtractionResult]):
         super().__init__(
             hass,
             _LOGGER,
+            config_entry=entry,
             name=f"{entry.title} source",
             update_interval=timedelta(minutes=max(1, interval_minutes)),
         )
@@ -76,25 +77,28 @@ class WebDataCoordinator(DataUpdateCoordinator[ExtractionResult]):
             self.last_source_error = str(err)
             raise UpdateFailed(str(err)) from err
 
-        result = ExtractionResult()
-        for entity in self.entity_configs:
-            try:
-                if source_type == SOURCE_JSON:
+        entity_configs = self.entity_configs
+        if source_type == SOURCE_JSON:
+            result = ExtractionResult()
+            for entity in entity_configs:
+                try:
                     if entity.path is None:
                         raise ValueError("No JSON path is configured")
-                    value = resolve_json_pointer(response.json_data, entity.path)
-                else:
-                    if entity.selector is None:
-                        raise ValueError("No HTML selector is configured")
-                    value = extract_html_value(
-                        response.text,
-                        entity.selector,
-                        entity.index,
-                        entity.attribute,
+                    result.values[entity.key] = resolve_json_pointer(
+                        response.json_data,
+                        entity.path,
                     )
-                result.values[entity.key] = value
-            except (KeyError, TypeError, ValueError) as err:
-                result.extraction_errors[entity.key] = str(err)
+                except (KeyError, TypeError, ValueError) as err:
+                    result.extraction_errors[entity.key] = str(err)
+        else:
+            # BeautifulSoup and soupsieve can do meaningful CPU work on a large
+            # document. Parse once and extract every configured value off the HA
+            # event loop, mirroring Home Assistant's own scrape integration pattern.
+            result = await self.hass.async_add_executor_job(
+                extract_html_entities,
+                response.text,
+                entity_configs,
+            )
 
         self.last_successful_update = dt_util.utcnow()
         self.last_source_error = None
