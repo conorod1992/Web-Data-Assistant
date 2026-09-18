@@ -138,8 +138,7 @@ test("a nested object can become attributes with one direct scalar as state", as
   await shadow.getByLabel("URL").fill("https://example.test/weather.json");
   await shadow.getByRole("button", { name: "Load JSON" }).click();
 
-  const currentBranch = shadow.locator(".json-tree-branch").filter({ hasText: "current" }).first();
-  await currentBranch.getByRole("button", { name: "Use as attribute group" }).click();
+  await shadow.locator('.json-use-object[data-object-path="/current"]').click();
 
   await expect(shadow.getByLabel("Object to import")).toHaveValue("/current");
   await expect(shadow.getByText("weather", { exact: true })).toBeVisible();
