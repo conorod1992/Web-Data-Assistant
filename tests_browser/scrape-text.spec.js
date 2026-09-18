@@ -213,6 +213,11 @@ test("multiple scraped values become separate sensors from one source", async ({
   await shadow.getByLabel("Unit (optional)").fill("%");
   await shadow.getByRole("button", { name: "Add sensor" }).click();
 
+  const addedNames = shadow.locator(".scrape-added-name");
+  const addedUnits = shadow.locator(".scrape-added-unit");
+  await addedNames.nth(1).fill("Relative Humidity");
+  await addedUnits.nth(1).fill("% RH");
+
   await shadow.getByRole("button", { name: "Create in Home Assistant" }).click();
 
   const createMessage = await page.evaluate(() =>
@@ -229,12 +234,12 @@ test("multiple scraped values become separate sensors from one source", async ({
       unit: "°C",
     },
     {
-      key: "humidity",
-      name: "Humidity",
+      key: "relative_humidity",
+      name: "Relative Humidity",
       selector: ".humidity",
       index: 0,
       value_type: "text",
-      unit: "%",
+      unit: "% RH",
     },
   ]);
 });
