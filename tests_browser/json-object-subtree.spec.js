@@ -54,7 +54,7 @@ const preview = {
   ],
 };
 
-async function mountPanel(page, { lifecycle = false } = {}) {
+async function mountPanel(page, { lifecycle = false, previewData = preview } = {}) {
   await page.setContent("<web-data-assistant-panel></web-data-assistant-panel>");
   await page.addScriptTag({ path: PANEL_SCRIPT });
   if (lifecycle) await page.addScriptTag({ path: LIFECYCLE_SCRIPT });
@@ -127,7 +127,7 @@ async function mountPanel(page, { lifecycle = false } = {}) {
         throw new Error(`Unexpected call: ${message.type}`);
       },
     };
-  }, { previewData: preview, lifecycleMode: lifecycle });
+  }, { previewData, lifecycleMode: lifecycle });
 }
 
 test("a nested object can become attributes with one direct scalar as state", async ({ page }) => {
@@ -201,4 +201,47 @@ test("Edit reconstructs a nested object import and preserves its stable key", as
     device_class: "temperature",
     state_class: "measurement",
   });
+});
+
+
+test("root array structured import remains whole-response unless a nested object is chosen", async ({ page }) => {
+  const arrayPreview = {
+    status: 200,
+    content_type: "application/json",
+    truncated: false,
+    root_type: "list",
+    root_fields: [],
+    object_nodes: [{
+      path: "/0",
+      fields: [
+        { name: "day", path: "/0/day", preview: "Friday", value_type: "str" },
+        { name: "high", path: "/0/high", preview: "16", value_type: "int" },
+      ],
+    }],
+    values: [
+      { path: "/0/day", display_path: "[0].day", preview: "Friday", value_type: "str" },
+      { path: "/0/high", display_path: "[0].high", preview: "16", value_type: "int" },
+    ],
+  };
+  await mountPanel(page, { previewData: arrayPreview });
+  const shadow = page.locator("web-data-assistant-panel").locator(":scope");
+
+  await shadow.getByLabel("Source name").fill("Forecast");
+  await shadow.getByLabel("URL").fill("https://example.test/forecast.json");
+  await shadow.getByRole("button", { name: "Load JSON" }).click();
+  await shadow.getByRole("button", { name: /Import object as attributes/ }).click();
+
+  await expect(shadow.getByText("Import response as one structured attribute")).toBeVisible();
+  await expect(shadow.getByLabel("Object to import")).toHaveCount(0);
+
+  await shadow.getByRole("button", { name: "Create in Home Assistant" }).click();
+  const create = await page.evaluate(() =>
+    window.__messages.find((message) => message.type === "web_data_assistant/create_source")
+  );
+  expect(create.entities).toEqual([{
+    key: "forecast",
+    name: "Forecast",
+    value_type: "text",
+    attributes: { items: "" },
+  }]);
 });
