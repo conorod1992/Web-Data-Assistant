@@ -192,7 +192,7 @@ test("multiple scraped values become separate sensors from one source", async ({
   await shadow.getByLabel("New sensor unit (optional)").fill("°C");
   await shadow.getByRole("button", { name: "Add sensor" }).click();
 
-  await expect(shadow.getByText("Values from this page")).toBeVisible();
+  await expect(shadow.getByRole("heading", { name: "Values from this page", exact: true })).toBeVisible();
   await expect(shadow.getByText("Temperature", { exact: true })).toBeVisible();
 
   await shadow.getByLabel("Current text or value").fill("82%");
