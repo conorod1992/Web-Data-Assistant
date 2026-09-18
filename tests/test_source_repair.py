@@ -5,6 +5,7 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, patch
 
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import entity_registry as er
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.web_data_assistant.const import (
@@ -86,3 +87,96 @@ async def test_list_sources_reports_repairable_extraction_issue_without_secrets(
     assert "password" not in payload_text
     assert "token=secret" not in payload_text
     assert "private" not in payload_text
+
+
+async def test_repair_json_entity_updates_only_selected_path_and_preserves_identity(
+    hass: HomeAssistant,
+    hass_ws_client,
+) -> None:
+    """Repair one broken JSON sensor without requiring broken siblings to validate."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Weather",
+        data={
+            CONF_SOURCE_NAME: "Weather",
+            CONF_SOURCE_TYPE: SOURCE_JSON,
+            CONF_URL: "https://example.test/weather.json",
+            CONF_FAILURE_MODE: FAILURE_UNAVAILABLE,
+            CONF_ENTITIES: [
+                {
+                    "key": "temperature",
+                    "name": "Temperature",
+                    CONF_PATH: "/old/temperature",
+                    CONF_VALUE_TYPE: VALUE_NUMBER,
+                },
+                {
+                    "key": "humidity",
+                    "name": "Humidity",
+                    CONF_PATH: "/old/humidity",
+                    CONF_VALUE_TYPE: VALUE_NUMBER,
+                },
+            ],
+        },
+    )
+    entry.add_to_hass(hass)
+    fetch = AsyncMock(return_value=_response({"current": {"temperature": 14.6}}))
+
+    with patch(
+        "custom_components.web_data_assistant.client.WebDataClient.async_fetch",
+        new=fetch,
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        registry = er.async_get(hass)
+        temperature_id = registry.async_get_entity_id(
+            "sensor", DOMAIN, f"{entry.entry_id}_temperature"
+        )
+        humidity_id = registry.async_get_entity_id(
+            "sensor", DOMAIN, f"{entry.entry_id}_humidity"
+        )
+        assert temperature_id is not None
+        assert humidity_id is not None
+
+        client = await hass_ws_client(hass)
+        await client.send_json(
+            {
+                "id": 1,
+                "type": f"{DOMAIN}/repair_entity",
+                "entry_id": entry.entry_id,
+                "entity_key": "temperature",
+                CONF_PATH: "/current/temperature",
+            }
+        )
+        message = await client.receive_json()
+        await hass.async_block_till_done()
+
+    assert message["success"] is True
+    assert message["result"]["entity_key"] == "temperature"
+
+    updated = hass.config_entries.async_get_entry(entry.entry_id)
+    assert updated is not None
+    entities = {entity["key"]: entity for entity in updated.data[CONF_ENTITIES]}
+    assert entities["temperature"][CONF_PATH] == "/current/temperature"
+    assert entities["humidity"][CONF_PATH] == "/old/humidity"
+
+    registry = er.async_get(hass)
+    assert (
+        registry.async_get_entity_id(
+            "sensor", DOMAIN, f"{entry.entry_id}_temperature"
+        )
+        == temperature_id
+    )
+    assert (
+        registry.async_get_entity_id(
+            "sensor", DOMAIN, f"{entry.entry_id}_humidity"
+        )
+        == humidity_id
+    )
+
+    temperature_state = hass.states.get(temperature_id)
+    humidity_state = hass.states.get(humidity_id)
+    assert temperature_state is not None
+    assert temperature_state.state == "14.6"
+    assert humidity_state is not None
+    assert humidity_state.state == "unavailable"
