@@ -234,3 +234,63 @@ async def test_multiple_scrape_sensors_share_fetch_and_html_parse(
     assert humidity_id is not None
     assert hass.states[temperature_id].state == "14°C"
     assert hass.states[humidity_id].state == "82%"
+
+
+
+async def test_multi_scrape_extraction_failure_is_isolated(
+    hass: HomeAssistant,
+) -> None:
+    """Keep valid scrape sensors available when one selector stops matching."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Weather Page",
+        data={
+            CONF_SOURCE_NAME: "Weather Page",
+            CONF_SOURCE_TYPE: SOURCE_SCRAPE,
+            CONF_URL: "https://example.test/weather",
+            CONF_FAILURE_MODE: FAILURE_UNAVAILABLE,
+            CONF_ENTITIES: [
+                {
+                    "key": "temperature",
+                    "name": "Temperature",
+                    CONF_SELECTOR: ".temperature",
+                    CONF_VALUE_TYPE: VALUE_TEXT,
+                },
+                {
+                    "key": "humidity",
+                    "name": "Humidity",
+                    CONF_SELECTOR: ".humidity",
+                    CONF_VALUE_TYPE: VALUE_TEXT,
+                },
+            ],
+        },
+    )
+    entry.add_to_hass(hass)
+    response = FetchResponse(
+        status=200,
+        content_type="text/html",
+        text='<html><body><span class="temperature">14°C</span></body></html>',
+        json_data=None,
+    )
+
+    with patch(
+        "custom_components.web_data_assistant.client.WebDataClient.async_fetch",
+        new=AsyncMock(return_value=response),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+    registry = er.async_get(hass)
+    temperature_id = registry.async_get_entity_id(
+        "sensor", DOMAIN, f"{entry.entry_id}_temperature"
+    )
+    humidity_id = registry.async_get_entity_id(
+        "sensor", DOMAIN, f"{entry.entry_id}_humidity"
+    )
+    assert temperature_id is not None
+    assert humidity_id is not None
+    assert hass.states[temperature_id].state == "14°C"
+    assert hass.states[humidity_id].state == STATE_UNAVAILABLE
+    assert entry.runtime_data.last_update_success is True
+    assert entry.runtime_data.extraction_error_for("temperature") is None
+    assert entry.runtime_data.extraction_error_for("humidity") is not None
