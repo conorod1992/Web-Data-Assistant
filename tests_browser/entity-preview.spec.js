@@ -66,7 +66,6 @@ test("preview mirrors separate JSON sensor definitions and updates live", async 
   await shadow.locator(".json-row").filter({ hasText: "temperature" }).locator("input[type=checkbox]").check();
   await shadow.locator(".json-row").filter({ hasText: "humidity" }).locator("input[type=checkbox]").check();
 
-  await shadow.locator(".json-unit").filter({ has: shadow.locator('[data-path="/temperature"]') }).count().catch(() => 0);
   await shadow.locator('.json-unit[data-path="/temperature"]').fill("°C");
   await shadow.locator('.json-name[data-path="/humidity"]').fill("Relative Humidity");
   await shadow.locator('.json-unit[data-path="/humidity"]').fill("%");
