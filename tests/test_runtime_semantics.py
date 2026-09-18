@@ -232,8 +232,8 @@ async def test_multiple_scrape_sensors_share_fetch_and_html_parse(
     )
     assert temperature_id is not None
     assert humidity_id is not None
-    assert hass.states[temperature_id].state == "14°C"
-    assert hass.states[humidity_id].state == "82%"
+    assert hass.states.get(temperature_id).state == "14°C"
+    assert hass.states.get(humidity_id).state == "82%"
 
 
 
@@ -289,8 +289,8 @@ async def test_multi_scrape_extraction_failure_is_isolated(
     )
     assert temperature_id is not None
     assert humidity_id is not None
-    assert hass.states[temperature_id].state == "14°C"
-    assert hass.states[humidity_id].state == STATE_UNAVAILABLE
+    assert hass.states.get(temperature_id).state == "14°C"
+    assert hass.states.get(humidity_id).state == STATE_UNAVAILABLE
     assert entry.runtime_data.last_update_success is True
     assert entry.runtime_data.extraction_error_for("temperature") is None
     assert entry.runtime_data.extraction_error_for("humidity") is not None
