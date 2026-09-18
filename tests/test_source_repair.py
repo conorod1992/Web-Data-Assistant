@@ -367,3 +367,54 @@ async def test_repair_entity_requires_admin_before_fetch(
     assert message["success"] is False
     assert message["error"]["code"] == "unauthorized"
     fetch.assert_not_awaited()
+
+
+async def test_invalid_repair_does_not_change_stored_extraction(
+    hass: HomeAssistant,
+    hass_ws_client,
+) -> None:
+    """Leave the source untouched when a proposed replacement cannot be validated."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Weather",
+        data={
+            CONF_SOURCE_NAME: "Weather",
+            CONF_SOURCE_TYPE: SOURCE_JSON,
+            CONF_URL: "https://example.test/weather.json",
+            CONF_FAILURE_MODE: FAILURE_UNAVAILABLE,
+            CONF_ENTITIES: [
+                {
+                    "key": "humidity",
+                    "name": "Humidity",
+                    CONF_PATH: "/old/humidity",
+                    CONF_VALUE_TYPE: VALUE_NUMBER,
+                }
+            ],
+        },
+    )
+    entry.add_to_hass(hass)
+
+    with patch(
+        "custom_components.web_data_assistant.client.WebDataClient.async_fetch",
+        new=AsyncMock(return_value=_response({"current": {"humidity": 82}})),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        client = await hass_ws_client(hass)
+        await client.send_json(
+            {
+                "id": 1,
+                "type": f"{DOMAIN}/repair_entity",
+                "entry_id": entry.entry_id,
+                "entity_key": "humidity",
+                CONF_PATH: "/still/missing",
+            }
+        )
+        message = await client.receive_json()
+
+    assert message["success"] is False
+    assert message["error"]["code"] == "validation_failed"
+    stored = hass.config_entries.async_get_entry(entry.entry_id)
+    assert stored is not None
+    assert stored.data[CONF_ENTITIES][0][CONF_PATH] == "/old/humidity"
