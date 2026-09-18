@@ -319,3 +319,51 @@ async def test_complex_json_entity_is_reported_but_not_directly_repairable(
     repair = await client.receive_json()
     assert repair["success"] is False
     assert repair["error"]["code"] == "not_repairable"
+
+
+async def test_repair_entity_requires_admin_before_fetch(
+    hass: HomeAssistant,
+    hass_ws_client,
+    hass_read_only_access_token: str,
+) -> None:
+    """Reject non-admin repair attempts before validating the replacement source."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Weather",
+        data={
+            CONF_SOURCE_NAME: "Weather",
+            CONF_SOURCE_TYPE: SOURCE_JSON,
+            CONF_URL: "https://example.test/weather.json",
+            CONF_FAILURE_MODE: FAILURE_UNAVAILABLE,
+            CONF_ENTITIES: [
+                {
+                    "key": "humidity",
+                    "name": "Humidity",
+                    CONF_PATH: "/old/humidity",
+                    CONF_VALUE_TYPE: VALUE_NUMBER,
+                }
+            ],
+        },
+    )
+    entry.add_to_hass(hass)
+
+    client = await hass_ws_client(hass, hass_read_only_access_token)
+    fetch = AsyncMock(return_value=_response({"current": {"humidity": 82}}))
+    with patch(
+        "custom_components.web_data_assistant.client.WebDataClient.async_fetch",
+        new=fetch,
+    ):
+        await client.send_json(
+            {
+                "id": 1,
+                "type": f"{DOMAIN}/repair_entity",
+                "entry_id": entry.entry_id,
+                "entity_key": "humidity",
+                CONF_PATH: "/current/humidity",
+            }
+        )
+        message = await client.receive_json()
+
+    assert message["success"] is False
+    assert message["error"]["code"] == "unauthorized"
+    fetch.assert_not_awaited()
