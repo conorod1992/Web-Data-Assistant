@@ -123,6 +123,7 @@ if (WebDataAssistantJsonUxPanel && !WebDataAssistantJsonUxPanel.prototype.__json
   const originalRenderAggregateJsonReview = WebDataAssistantJsonUxPanel.prototype._renderAggregateJsonReview;
   const originalEntities = WebDataAssistantJsonUxPanel.prototype._entities;
   const originalBind = WebDataAssistantJsonUxPanel.prototype._bind;
+  const originalResetResults = WebDataAssistantJsonUxPanel.prototype._resetResults;
   const originalPopulateEditableSource = WebDataAssistantJsonUxPanel.prototype._populateEditableSource;
   const originalPreviewEntityHtml = WebDataAssistantJsonUxPanel.prototype._previewEntityHtml;
 
@@ -262,7 +263,8 @@ if (WebDataAssistantJsonUxPanel && !WebDataAssistantJsonUxPanel.prototype.__json
       + this._field("Home Assistant type",'<select id="aggregate-device-class">' + this._deviceClassOptions(this._aggregateDeviceClassChoice,native.suggestedDeviceClass) + '</select>')
       + this._field("Statistics behavior",'<select id="aggregate-state-class">' + this._stateClassOptions(this._aggregateStateClassChoice,native.suggestedStateClass) + '</select>')
       + '</div>';
-    return base.replace('</div>', fields + '</div>');
+    const insertAt = base.lastIndexOf("</div>");
+    return insertAt >= 0 ? base.slice(0, insertAt) + fields + base.slice(insertAt) : base + fields;
   };
 
   WebDataAssistantJsonUxPanel.prototype._bind = function () {
@@ -284,6 +286,7 @@ if (WebDataAssistantJsonUxPanel && !WebDataAssistantJsonUxPanel.prototype.__json
       this._render();
     });
     this.shadowRoot.querySelectorAll(".json-unit").forEach((input) => input.addEventListener("change",() => this._render()));
+    this.shadowRoot.querySelectorAll(".json-name").forEach((input) => input.addEventListener("change",() => this._render()));
     this.shadowRoot.getElementById("aggregate-unit")?.addEventListener("change",() => this._render());
   };
 
@@ -314,6 +317,12 @@ if (WebDataAssistantJsonUxPanel && !WebDataAssistantJsonUxPanel.prototype.__json
       else delete entities[0].state_class;
     }
     return entities;
+  };
+
+  WebDataAssistantJsonUxPanel.prototype._resetResults = function () {
+    originalResetResults.call(this);
+    this._aggregateDeviceClassChoice = undefined;
+    this._aggregateStateClassChoice = undefined;
   };
 
   if (originalPopulateEditableSource) {
