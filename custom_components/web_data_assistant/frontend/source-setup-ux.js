@@ -134,8 +134,8 @@ if (WebDataAssistantSetupUxPanel && !WebDataAssistantSetupUxPanel.prototype.__se
   };
 
   WebDataAssistantSetupUxPanel.prototype._previewStateForEntity = function (entity) {
-    if (entity.value_type === "json" || entity.path === undefined) return "Loaded";
     if (this._sourceType === "scrape") return this._scrapePreviewForEntity(entity);
+    if (entity.value_type === "json" || entity.path === undefined) return "Loaded";
     return this._jsonPreviewForPath(entity.path);
   };
 
