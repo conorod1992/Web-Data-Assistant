@@ -141,7 +141,7 @@ test("a nested object can become attributes with one direct scalar as state", as
   await shadow.locator('.json-use-object[data-object-path="/current"]').click();
 
   await expect(shadow.getByLabel("Object to import")).toHaveValue("/current");
-  await expect(shadow.getByText("weather", { exact: true })).toBeVisible();
+  await expect(shadow.locator(".root-field strong").filter({ hasText: /^weather$/ })).toBeVisible();
   await shadow.locator('.json-object-state[value="/current/temperature"]').check();
   await shadow.getByLabel("State unit (optional)").fill("°C");
   await shadow.getByLabel("State unit (optional)").blur();
