@@ -93,5 +93,6 @@ test("failed source edit keeps the populated edit form available", async ({ page
   await expect(shadow.getByLabel("Update interval (minutes)")).toHaveValue("20");
   await expect(shadow.getByRole("button", { name: "Save changes" })).toBeVisible();
   await expect(shadow.getByRole("button", { name: "Cancel edit" })).toBeVisible();
-  await expect(shadow.locator(".ha-create-preview")).toContainText("My edited weather");
+  await expect(shadow.locator(".ha-create-preview")).toContainText("Temperature");
+  await expect(shadow.locator(".ha-create-preview")).toContainText("Stable entity key: temperature");
 });
