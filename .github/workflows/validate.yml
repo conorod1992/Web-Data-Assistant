@@ -100,6 +100,7 @@ jobs:
           tests/test_scrape_flow_runtime.py
           tests/test_runtime_semantics.py
           tests/test_json_attributes_runtime.py
+          tests/test_native_metadata_runtime.py
           tests/test_client_http.py
           tests/test_client_http_content_type.py
           tests/test_websocket_validation.py
