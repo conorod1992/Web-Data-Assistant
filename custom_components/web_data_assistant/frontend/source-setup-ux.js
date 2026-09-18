@@ -112,6 +112,11 @@ if (WebDataAssistantSetupUxPanel && !WebDataAssistantSetupUxPanel.prototype.__se
     const rootField = (this._jsonResult?.root_fields || []).find((item) => item.path === path);
     if (rootField) return rootField.preview;
 
+    for (const node of this._jsonResult?.object_nodes || []) {
+      const field = (node.fields || []).find((item) => item.path === path);
+      if (field) return field.preview;
+    }
+
     if (path === "" && this._jsonResult) return "Structured response";
     return "Current value unavailable in setup preview";
   };
