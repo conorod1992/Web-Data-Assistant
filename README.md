@@ -59,11 +59,16 @@ The Web Data Assistant panel includes a configured-source dashboard showing sour
 Each source can be managed directly from its card:
 
 - **Refresh now** — request an immediate source refresh.
+- **Repair** — when the source is reachable but an individual selector/JSON path breaks, reopen a guided picker for that sensor only and replace its extraction while preserving the same entity key/identity.
 - **Edit** — reopen the existing source in the guided setup UI with its request and extraction settings preloaded.
 - **Duplicate** — copy the source into the guided UI, defaulting the new name to `<source name> copy`, then save it as a separate Home Assistant config entry/device.
 - **Delete** — remove the source through Home Assistant's config-entry lifecycle after an inline named confirmation.
 
 Editing updates and reloads the existing config entry rather than creating a replacement. Sensor keys that remain unchanged therefore retain the same Home Assistant unique IDs. If a sensor is deliberately removed during editing, its stale entity-registry entry is cleaned up rather than being left behind as a ghost entity.
+
+When extraction fails but the remote source itself is healthy, the source card identifies the affected sensor rather than showing only a generic issue count. Ordinary one-path JSON sensors and page-scrape selectors offer **Repair**. JSON repair loads the live response and lets the user choose a replacement scalar path; scrape repair uses the same current-text/context matching model as initial setup. The replacement is validated before persistence and only the selected entity definition is changed, so other broken sibling sensors do not block the repair.
+
+Complex JSON entities that combine a state path with multiple attribute paths are deliberately not given a one-click Repair button because the failing internal path can be ambiguous. Those cases direct the user to full **Edit** instead. Repair is user-confirmed; Web Data Assistant does not silently guess or automatically rewrite selectors/paths.
 
 Edits are validated against a fresh source response before they are persisted. If Home Assistant cannot reload an edited source, Web Data Assistant restores the previous title, data and options and reports the failure instead of leaving the new configuration partially applied.
 
@@ -157,6 +162,7 @@ custom_components/web_data_assistant/
 ├── frontend.py
 ├── frontend/
 │   ├── source-lifecycle.js
+│   ├── source-repair.js
 │   ├── web-data-assistant-panel-entry.js
 │   └── web-data-assistant-panel.js
 ├── management.py
@@ -182,6 +188,7 @@ tests/
 ├── test_source_lifecycle.py
 ├── test_source_lifecycle_auth.py
 ├── test_source_lifecycle_rollback.py
+├── test_source_repair.py
 ├── test_websocket_json_attributes.py
 └── ...
 
@@ -229,6 +236,9 @@ A separate runtime suite is pinned to **Home Assistant 2026.9.2** through `pytes
 - removed-key entity-registry cleanup
 - rollback to the previous configuration when an edited source cannot reload
 - lifecycle-command authorization for non-admin users
+- per-entity guided repair for broken JSON paths and scrape selectors
+- repair isolation from broken sibling entities
+- repair rollback when validation/reload fails
 - privacy-safe URL display
 - guided JSON/scrape fallback config flows and options reload
 - WebSocket schema, authorization and JSON-attribute validation
@@ -249,6 +259,8 @@ A separate Playwright/Chromium suite renders the actual custom panel JavaScript 
 - delete confirmation/cancel/removal behavior
 - guided source Edit and Duplicate flows
 - preservation of the populated Edit form after an update failure
+- guided JSON-path and scrape-selector repair flows
+- complex JSON repair fallback to full Edit
 - large/truncated JSON discovery and filtering
 - narrow/mobile-width layout without horizontal overflow
 - request settings, validation, error recovery and save-state preservation

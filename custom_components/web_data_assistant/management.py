@@ -83,12 +83,39 @@ def _entry_snapshot(entry: ConfigEntry) -> dict[str, Any]:
     last_successful_update = None
     source_available = False
     extraction_error_count = 0
+    extraction_issues: list[dict[str, Any]] = []
     if coordinator is not None:
         source_available = coordinator.last_update_success
         if coordinator.last_successful_update is not None:
             last_successful_update = coordinator.last_successful_update.isoformat()
-        if coordinator.data is not None:
+        if source_available and coordinator.data is not None:
             extraction_error_count = len(coordinator.data.extraction_errors)
+            entities_by_key = {
+                str(entity.get("key")): entity
+                for entity in entry.data.get(CONF_ENTITIES, [])
+            }
+            for key, error in coordinator.data.extraction_errors.items():
+                entity = entities_by_key.get(str(key), {})
+                attributes = entity.get(CONF_ATTRIBUTES, {})
+                repairable = bool(
+                    (
+                        entry.data.get(CONF_SOURCE_TYPE) == SOURCE_JSON
+                        and entity.get(CONF_PATH) is not None
+                        and not attributes
+                    )
+                    or (
+                        entry.data.get(CONF_SOURCE_TYPE) != SOURCE_JSON
+                        and entity.get("selector")
+                    )
+                )
+                extraction_issues.append(
+                    {
+                        "key": str(key),
+                        "name": str(entity.get("name") or key),
+                        "error": str(error),
+                        "repairable": repairable,
+                    }
+                )
 
     return {
         "entry_id": entry.entry_id,
@@ -111,6 +138,7 @@ def _entry_snapshot(entry: ConfigEntry) -> dict[str, Any]:
         ),
         "source_available": source_available,
         "extraction_error_count": extraction_error_count,
+        "extraction_issues": extraction_issues,
         "last_successful_update": last_successful_update,
     }
 
@@ -332,6 +360,137 @@ async def websocket_update_source(
     connection.send_result(msg["id"], _entry_snapshot(entry))
 
 
+async def _validate_replacement_entity(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    entity: dict[str, Any],
+) -> None:
+    """Validate one replacement extraction without requiring sibling entities to work."""
+    source_type = entry.data[CONF_SOURCE_TYPE]
+    client = WebDataClient(hass)
+    response = await client.async_fetch(
+        entry.data[CONF_URL],
+        method=entry.data.get(CONF_METHOD, METHOD_GET),
+        headers=entry.data.get(CONF_HEADERS),
+        payload=entry.data.get(CONF_PAYLOAD),
+        verify_ssl=entry.data.get(CONF_VERIFY_SSL, DEFAULT_VERIFY_SSL),
+        parse_json=source_type == SOURCE_JSON,
+    )
+
+    if source_type == SOURCE_JSON:
+        path = entity.get(CONF_PATH)
+        if path is None or entity.get(CONF_ATTRIBUTES):
+            raise ValueError(
+                "This JSON sensor has multiple extraction paths; use Edit source to repair it"
+            )
+        resolve_json_pointer(response.json_data, str(path))
+        return
+
+    validation = await hass.async_add_executor_job(
+        extract_html_entities,
+        response.text,
+        [WebDataEntityConfig.from_dict(entity)],
+    )
+    if validation.extraction_errors:
+        raise ValueError(next(iter(validation.extraction_errors.values())))
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/repair_entity",
+        vol.Required("entry_id"): str,
+        vol.Required("entity_key"): str,
+        vol.Optional(CONF_PATH): str,
+        vol.Optional("selector"): str,
+        vol.Optional("index", default=0): vol.Coerce(int),
+    }
+)
+@websocket_api.require_admin
+@websocket_api.async_response
+async def websocket_repair_entity(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Replace one broken extraction while preserving entity identity."""
+    entry = _find_entry(hass, msg["entry_id"])
+    if entry is None:
+        connection.send_error(msg["id"], "not_found", "Source was not found")
+        return
+
+    entities = [dict(entity) for entity in entry.data.get(CONF_ENTITIES, [])]
+    entity_index = next(
+        (
+            index
+            for index, entity in enumerate(entities)
+            if str(entity.get("key")) == msg["entity_key"]
+        ),
+        None,
+    )
+    if entity_index is None:
+        connection.send_error(msg["id"], "not_found", "Sensor was not found")
+        return
+
+    replacement = dict(entities[entity_index])
+    source_type = entry.data.get(CONF_SOURCE_TYPE)
+    if source_type == SOURCE_JSON:
+        if replacement.get(CONF_ATTRIBUTES):
+            connection.send_error(
+                msg["id"],
+                "not_repairable",
+                "This JSON sensor has multiple extraction paths; use Edit source to repair it",
+            )
+            return
+        path = msg.get(CONF_PATH)
+        if path is None:
+            connection.send_error(
+                msg["id"], "invalid_replacement", "Choose a JSON value to repair this sensor"
+            )
+            return
+        replacement[CONF_PATH] = path
+    else:
+        selector = str(msg.get("selector") or "").strip()
+        if not selector:
+            connection.send_error(
+                msg["id"], "invalid_replacement", "Choose a page value to repair this sensor"
+            )
+            return
+        replacement["selector"] = selector
+        replacement["index"] = int(msg.get("index", 0))
+
+    try:
+        _validate_entity_definitions(source_type, [replacement])
+        await _validate_replacement_entity(hass, entry, replacement)
+    except (WebDataError, KeyError, TypeError, ValueError) as err:
+        connection.send_error(msg["id"], "validation_failed", str(err))
+        return
+
+    old_data = dict(entry.data)
+    new_data = dict(entry.data)
+    entities[entity_index] = replacement
+    new_data[CONF_ENTITIES] = entities
+    hass.config_entries.async_update_entry(entry, data=new_data)
+
+    if not await hass.config_entries.async_reload(entry.entry_id):
+        hass.config_entries.async_update_entry(entry, data=old_data)
+        await hass.config_entries.async_reload(entry.entry_id)
+        connection.send_error(
+            msg["id"],
+            "reload_failed",
+            "Home Assistant could not reload the repaired sensor; previous settings were restored",
+        )
+        return
+
+    connection.send_result(
+        msg["id"],
+        {
+            "entry_id": entry.entry_id,
+            "entity_key": msg["entity_key"],
+            "source": _entry_snapshot(entry),
+        },
+    )
+
+
 @websocket_api.websocket_command(
     {
         vol.Required("type"): f"{DOMAIN}/refresh_source",
@@ -395,6 +554,7 @@ def async_register_management_commands(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, websocket_list_sources)
     websocket_api.async_register_command(hass, websocket_get_source)
     websocket_api.async_register_command(hass, websocket_update_source)
+    websocket_api.async_register_command(hass, websocket_repair_entity)
     websocket_api.async_register_command(hass, websocket_refresh_source)
     websocket_api.async_register_command(hass, websocket_delete_source)
     domain_data[DATA_MANAGEMENT_REGISTERED] = True

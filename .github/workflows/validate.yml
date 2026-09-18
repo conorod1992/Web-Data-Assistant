@@ -40,6 +40,7 @@ jobs:
         run: |
           node --check custom_components/web_data_assistant/frontend/web-data-assistant-panel.js
           node --check custom_components/web_data_assistant/frontend/source-lifecycle.js
+          node --check custom_components/web_data_assistant/frontend/source-repair.js
           node --check custom_components/web_data_assistant/frontend/web-data-assistant-panel-entry.js
 
       - name: Run pure helper tests
@@ -91,6 +92,7 @@ jobs:
           tests/test_source_lifecycle.py
           tests/test_source_lifecycle_auth.py
           tests/test_source_lifecycle_rollback.py
+          tests/test_source_repair.py
           tests/test_config_flow_runtime.py
           tests/test_scrape_flow_runtime.py
           tests/test_runtime_semantics.py
