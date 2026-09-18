@@ -179,3 +179,41 @@ test("preview shows current scraped value from the same entity payload", async (
     },
   ]);
 });
+
+
+test("preview explains structured object attributes and Loaded state", async ({ page }) => {
+  await mountPanel(page);
+  const shadow = page.locator("web-data-assistant-panel").locator(":scope");
+
+  await shadow.getByLabel("Source name").fill("Weather Object");
+  await shadow.getByLabel("URL").fill("https://example.test/weather.json");
+  await shadow.getByRole("button", { name: "Load JSON" }).click();
+  await shadow.getByRole("button", { name: /Import object as attributes/ }).click();
+
+  const preview = shadow.locator(".ha-create-preview");
+  await expect(preview.locator(".ha-preview-entity")).toHaveCount(1);
+  await expect(preview).toContainText("Weather Object");
+  await expect(preview).toContainText("Loaded");
+  await expect(preview).toContainText("2 attributes");
+  await expect(preview).toContainText("temperature");
+  await expect(preview).toContainText("14.6");
+  await expect(preview).toContainText("humidity");
+  await expect(preview).toContainText("82");
+  await expect(preview).toContainText("255-character state limit does not apply");
+
+  await shadow.getByRole("button", { name: "Create in Home Assistant" }).click();
+  const message = await page.evaluate(() =>
+    window.__webDataMessages.find((item) => item.type === "web_data_assistant/create_source")
+  );
+  expect(message.entities).toEqual([
+    {
+      key: "weather_object",
+      name: "Weather Object",
+      value_type: "text",
+      attributes: {
+        temperature: "/temperature",
+        humidity: "/humidity",
+      },
+    },
+  ]);
+});
