@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, patch
 
 from homeassistant.config_entries import SOURCE_USER
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import entity_registry as er
 
 from custom_components.web_data_assistant.const import (
     CONF_ENTITIES,
@@ -295,3 +296,80 @@ async def test_create_source_requires_admin(
     assert message["success"] is False
     assert message["error"]["code"] == "unauthorized"
     assert hass.config_entries.async_entries(DOMAIN) == []
+
+
+
+async def test_create_source_accepts_multiple_scrape_entities(
+    hass: HomeAssistant,
+    hass_ws_client,
+) -> None:
+    """Create multiple scrape sensors from one validated page source."""
+    flow = await hass.config_entries.flow.async_init(
+        DOMAIN,
+        context={"source": SOURCE_USER},
+    )
+    assert flow["step_id"] == "user"
+
+    response = FetchResponse(
+        status=200,
+        content_type="text/html",
+        text=(
+            '<html><body><span class="temperature">14°C</span>'
+            '<span class="humidity">82%</span></body></html>'
+        ),
+        json_data=None,
+    )
+    fetch = AsyncMock(return_value=response)
+    client = await hass_ws_client(hass)
+    with patch(
+        "custom_components.web_data_assistant.client.WebDataClient.async_fetch",
+        new=fetch,
+    ):
+        await client.send_json(
+            {
+                "id": 1,
+                "type": f"{DOMAIN}/create_source",
+                CONF_SOURCE_NAME: "Page Weather",
+                CONF_SOURCE_TYPE: SOURCE_SCRAPE,
+                CONF_URL: "https://example.test/weather",
+                CONF_FAILURE_MODE: FAILURE_UNAVAILABLE,
+                CONF_ENTITIES: [
+                    {
+                        "key": "temperature",
+                        "name": "Temperature",
+                        CONF_SELECTOR: ".temperature",
+                        CONF_VALUE_TYPE: VALUE_TEXT,
+                    },
+                    {
+                        "key": "humidity",
+                        "name": "Humidity",
+                        CONF_SELECTOR: ".humidity",
+                        CONF_VALUE_TYPE: VALUE_TEXT,
+                    },
+                ],
+            }
+        )
+        message = await client.receive_json()
+        assert message["success"] is True
+        entry_id = message["result"]["entry_id"]
+        await hass.async_block_till_done()
+
+    entry = hass.config_entries.async_get_entry(entry_id)
+    assert entry is not None
+    assert [entity["key"] for entity in entry.data[CONF_ENTITIES]] == [
+        "temperature",
+        "humidity",
+    ]
+
+    registry = er.async_get(hass)
+    temperature_id = registry.async_get_entity_id(
+        "sensor", DOMAIN, f"{entry_id}_temperature"
+    )
+    humidity_id = registry.async_get_entity_id(
+        "sensor", DOMAIN, f"{entry_id}_humidity"
+    )
+    assert temperature_id is not None
+    assert humidity_id is not None
+    assert hass.states[temperature_id].state == "14°C"
+    assert hass.states[humidity_id].state == "82%"
+    assert fetch.await_count >= 2
