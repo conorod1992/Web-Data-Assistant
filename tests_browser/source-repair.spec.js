@@ -13,12 +13,17 @@ const REPAIR_SCRIPT = path.resolve(
   __dirname,
   "../custom_components/web_data_assistant/frontend/source-repair.js"
 );
+const SETUP_UX_SCRIPT = path.resolve(
+  __dirname,
+  "../custom_components/web_data_assistant/frontend/source-setup-ux.js"
+);
 
 async function mountRepairPanel(page, { sourceType = "json", repairable = true } = {}) {
   await page.setContent("<web-data-assistant-panel></web-data-assistant-panel>");
   await page.addScriptTag({ path: PANEL_SCRIPT });
   await page.addScriptTag({ path: LIFECYCLE_SCRIPT });
   await page.addScriptTag({ path: REPAIR_SCRIPT });
+  await page.addScriptTag({ path: SETUP_UX_SCRIPT });
   await page.evaluate(({ type, isRepairable }) => {
     window.__webDataMessages = [];
     window.__repairApplied = false;
@@ -163,6 +168,9 @@ test("repairs a broken JSON sensor by selecting a replacement path", async ({ pa
   await expect(shadow.getByRole("heading", { name: "2. Choose the replacement value" })).toBeVisible();
   await expect(shadow.getByText(/Current stored path:/)).toContainText("/old/humidity");
   await expect(shadow.getByLabel("URL")).toBeDisabled();
+  await shadow.getByText("Advanced request settings", { exact: true }).click();
+  await expect(shadow.getByLabel("Header name 1")).toBeDisabled();
+  await expect(shadow.getByLabel("Header value 1")).toBeDisabled();
 
   await shadow.locator(".repair-option").filter({ hasText: "current.humidity" }).locator("input").check();
   await shadow.getByRole("button", { name: "Apply repair" }).click();

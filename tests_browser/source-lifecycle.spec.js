@@ -9,11 +9,16 @@ const LIFECYCLE_SCRIPT = path.resolve(
   __dirname,
   "../custom_components/web_data_assistant/frontend/source-lifecycle.js"
 );
+const SETUP_UX_SCRIPT = path.resolve(
+  __dirname,
+  "../custom_components/web_data_assistant/frontend/source-setup-ux.js"
+);
 
 async function mountPanel(page, { lifecycle = false } = {}) {
   await page.setContent("<web-data-assistant-panel></web-data-assistant-panel>");
   await page.addScriptTag({ path: PANEL_SCRIPT });
   await page.addScriptTag({ path: LIFECYCLE_SCRIPT });
+  await page.addScriptTag({ path: SETUP_UX_SCRIPT });
   await page.evaluate(({ lifecycleMode }) => {
     window.__webDataMessages = [];
     window.__webDataUpdated = false;
@@ -157,17 +162,23 @@ test("editing a JSON source preloads its config and preserves unchanged entity k
 
   await expect(shadow.getByLabel("Source name")).toHaveValue("Weather API");
   await expect(shadow.getByLabel("URL")).toHaveValue("https://user:password@example.test/weather?token=secret");
-  await expect(shadow.getByLabel("Headers (JSON object)")).toContainText("Bearer abc");
+  await shadow.getByText("Advanced request settings", { exact: true }).click();
+  await expect(shadow.getByLabel("Header name 1")).toHaveValue("Authorization");
+  await expect(shadow.getByLabel("Header value 1")).toHaveValue("Bearer abc");
   await expect(shadow.getByRole("heading", { name: "Edit source" })).toBeVisible();
 
   const temperature = shadow.locator(".json-row").filter({ hasText: "temperature" }).locator("input[type=checkbox]");
   const humidity = shadow.locator(".json-row").filter({ hasText: "humidity" }).locator("input[type=checkbox]");
   await expect(temperature).toBeChecked();
   await expect(humidity).toBeChecked();
+  await expect(shadow.locator(".ha-create-preview .ha-preview-entity")).toHaveCount(2);
+  await expect(shadow.locator(".ha-create-preview")).toContainText("Stable entity key: temperature");
+  await expect(shadow.locator(".ha-create-preview")).toContainText("Stable entity key: humidity");
 
   await shadow.getByLabel("Source name").fill("Renamed Weather");
   await shadow.getByLabel("Update interval (minutes)").fill("15");
   await humidity.uncheck();
+  await expect(shadow.locator(".ha-create-preview .ha-preview-entity")).toHaveCount(1);
   await shadow.getByRole("button", { name: "Save changes" }).click();
 
   await expect(shadow.getByText("Updated Renamed Weather successfully.")).toBeVisible();
@@ -196,6 +207,10 @@ test("duplicating a source preloads a copy and creates a separate source", async
   await expect(shadow.getByRole("heading", { name: "Duplicate source" })).toBeVisible();
   await expect(shadow.getByLabel("Source name")).toHaveValue("Weather API copy");
   await expect(shadow.getByLabel("URL")).toHaveValue("https://user:password@example.test/weather?token=secret");
+  await shadow.getByText("Advanced request settings", { exact: true }).click();
+  await expect(shadow.getByLabel("Header name 1")).toHaveValue("Authorization");
+  await expect(shadow.getByLabel("Header value 1")).toHaveValue("Bearer abc");
+  await expect(shadow.locator(".ha-create-preview .ha-preview-entity")).toHaveCount(2);
 
   const temperature = shadow.locator(".json-row").filter({ hasText: "temperature" }).locator("input[type=checkbox]");
   const humidity = shadow.locator(".json-row").filter({ hasText: "humidity" }).locator("input[type=checkbox]");

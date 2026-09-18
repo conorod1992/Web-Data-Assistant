@@ -5,10 +5,15 @@ const PANEL_SCRIPT = path.resolve(
   __dirname,
   "../custom_components/web_data_assistant/frontend/web-data-assistant-panel.js"
 );
+const SETUP_UX_SCRIPT = path.resolve(
+  __dirname,
+  "../custom_components/web_data_assistant/frontend/source-setup-ux.js"
+);
 
 async function mountPanel(page) {
   await page.setContent("<web-data-assistant-panel></web-data-assistant-panel>");
   await page.addScriptTag({ path: PANEL_SCRIPT });
+  await page.addScriptTag({ path: SETUP_UX_SCRIPT });
   await page.evaluate(() => {
     window.__webDataMessages = [];
     const panel = document.querySelector("web-data-assistant-panel");
@@ -43,7 +48,12 @@ test("advanced request, keep-last and long-text defaults are preserved", async (
   await shadow.getByLabel("URL").fill("https://example.test/data");
   await shadow.getByText("Advanced request settings", { exact: true }).click();
   await shadow.getByLabel("Request method").selectOption("POST");
-  await shadow.getByLabel("Headers (JSON object)").fill('{"Authorization":"Bearer test-token","X-Mode":"browser"}');
+  await shadow.getByRole("button", { name: "Add header" }).click();
+  await shadow.getByLabel("Header name 1").fill("Authorization");
+  await shadow.getByLabel("Header value 1").fill("Bearer test-token");
+  await shadow.getByRole("button", { name: "Add header" }).click();
+  await shadow.getByLabel("Header name 2").fill("X-Mode");
+  await shadow.getByLabel("Header value 2").fill("browser");
   await shadow.getByLabel("Request body").fill('{"query":"current"}');
   await shadow.getByLabel("Verify SSL certificate").uncheck();
 
