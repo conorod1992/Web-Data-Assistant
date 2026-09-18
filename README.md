@@ -1,6 +1,6 @@
 # Web Data Assistant
 
-Web Data Assistant is a Home Assistant custom integration for creating sensors from websites and JSON APIs through a guided interface, without needing to write CSS selectors, JSON paths, or templates.
+Web Data Assistant is a Home Assistant custom integration for creating and managing sensors from websites and JSON APIs through a guided interface, without needing to write CSS selectors, JSON paths, or templates.
 
 > **Development status:** early development. The current code is intended for development/testing rather than production use.
 
@@ -52,6 +52,23 @@ If text visible in the browser is absent from the fetched HTML response, the sit
 
 HTML parsing and extraction are moved off Home Assistant's event loop. Runtime scrape sources parse each fetched document once and extract all configured values from that shared parsed document.
 
+## Managing configured sources
+
+The Web Data Assistant panel includes a configured-source dashboard showing source type, privacy-safe endpoint, update interval, source health, last successful update and extraction-health information.
+
+Each source can be managed directly from its card:
+
+- **Refresh now** — request an immediate source refresh.
+- **Edit** — reopen the existing source in the guided setup UI with its request and extraction settings preloaded.
+- **Duplicate** — copy the source into the guided UI, defaulting the new name to `<source name> copy`, then save it as a separate Home Assistant config entry/device.
+- **Delete** — remove the source through Home Assistant's config-entry lifecycle after an inline named confirmation.
+
+Editing updates and reloads the existing config entry rather than creating a replacement. Sensor keys that remain unchanged therefore retain the same Home Assistant unique IDs. If a sensor is deliberately removed during editing, its stale entity-registry entry is cleaned up rather than being left behind as a ghost entity.
+
+Edits are validated against a fresh source response before they are persisted. If Home Assistant cannot reload an edited source, Web Data Assistant restores the previous title, data and options and reports the failure instead of leaving the new configuration partially applied.
+
+For privacy, the normal configured-source dashboard continues to receive only redacted endpoint information. The full stored URL, headers and request body are returned only through an explicit admin-only Edit/Duplicate request. The lifecycle WebSocket actions are all restricted to Home Assistant administrators.
+
 ## Long text values
 
 Home Assistant limits entity states to 255 characters. Web Data Assistant does not discard valid source data just because a text value exceeds that limit.
@@ -85,12 +102,10 @@ Sensors expose concise source-health information such as whether the latest sour
 
 Web Data Assistant has two setup surfaces:
 
-- A dedicated **Web Data Assistant** admin panel provides the intended guided experience, including the richer JSON output modes and per-sensor long-text choices.
+- A dedicated **Web Data Assistant** admin panel provides the intended guided experience, including the richer JSON output modes, per-sensor long-text choices and full source lifecycle management.
 - A conventional Home Assistant config flow remains available as a simpler fallback/compatibility setup path.
 
 Starting **Add Integration → Web Data Assistant** registers the guided panel immediately, so the visual workflow can be used before the first data source has been created.
-
-The panel also includes a configured-source dashboard showing source type, privacy-safe endpoint, update interval, source health, last successful update and extraction-health information. Loaded sources can be refreshed manually from the panel.
 
 Sensors created from the same source are grouped under one Home Assistant service device.
 
@@ -126,7 +141,7 @@ Repeated-container detection remains a promising later enhancement, but the init
 
 Diagnostics intentionally omit request header values, request bodies, current source values, URL credentials, query parameters and fragments. Extraction definitions and source-health metadata remain available to help diagnose failures.
 
-The management panel similarly receives privacy-safe endpoint strings rather than the full stored URL, so query-string credentials are not echoed into the browser UI.
+The management dashboard similarly receives privacy-safe endpoint strings rather than the full stored URL, so query-string credentials are not echoed into the browser UI during ordinary source listing. Full stored request details are exposed only to an authenticated Home Assistant administrator who explicitly opens Edit or Duplicate.
 
 ## Repository layout
 
@@ -141,6 +156,8 @@ custom_components/web_data_assistant/
 ├── extraction.py
 ├── frontend.py
 ├── frontend/
+│   ├── source-lifecycle.js
+│   ├── web-data-assistant-panel-entry.js
 │   └── web-data-assistant-panel.js
 ├── management.py
 ├── manifest.json
@@ -162,6 +179,9 @@ tests/
 ├── test_json_attributes_runtime.py
 ├── test_runtime_semantics.py
 ├── test_scrape_flow_runtime.py
+├── test_source_lifecycle.py
+├── test_source_lifecycle_auth.py
+├── test_source_lifecycle_rollback.py
 ├── test_websocket_json_attributes.py
 └── ...
 
@@ -175,6 +195,8 @@ tests_browser/
 ├── responsive.spec.js
 ├── scrape-text.spec.js
 ├── source-health.spec.js
+├── source-lifecycle.spec.js
+├── source-lifecycle-errors.spec.js
 └── ...
 ```
 
@@ -201,6 +223,12 @@ A separate runtime suite is pinned to **Home Assistant 2026.9.2** through `pytes
 - all three long-text policies
 - panel registration and management WebSocket APIs
 - panel-driven source creation and manual source refresh
+- source deletion through Home Assistant's config-entry lifecycle
+- explicit admin-only editable-config retrieval
+- in-place source editing while preserving stable entity identity
+- removed-key entity-registry cleanup
+- rollback to the previous configuration when an edited source cannot reload
+- lifecycle-command authorization for non-admin users
 - privacy-safe URL display
 - guided JSON/scrape fallback config flows and options reload
 - WebSocket schema, authorization and JSON-attribute validation
@@ -218,6 +246,9 @@ A separate Playwright/Chromium suite renders the actual custom panel JavaScript 
 - confirmation that the primary scrape panel does not use an iframe
 - source/default long-text handling controls
 - source health, stale retained states and manual refresh
+- delete confirmation/cancel/removal behavior
+- guided source Edit and Duplicate flows
+- preservation of the populated Edit form after an update failure
 - large/truncated JSON discovery and filtering
 - narrow/mobile-width layout without horizontal overflow
 - request settings, validation, error recovery and save-state preservation

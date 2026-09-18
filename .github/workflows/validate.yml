@@ -37,7 +37,10 @@ jobs:
           python -m json.tool hacs.json >/dev/null
 
       - name: Check frontend JavaScript syntax
-        run: node --check custom_components/web_data_assistant/frontend/web-data-assistant-panel.js
+        run: |
+          node --check custom_components/web_data_assistant/frontend/web-data-assistant-panel.js
+          node --check custom_components/web_data_assistant/frontend/source-lifecycle.js
+          node --check custom_components/web_data_assistant/frontend/web-data-assistant-panel-entry.js
 
       - name: Run pure helper tests
         run: python tests/test_extraction_preview.py -v
@@ -85,6 +88,9 @@ jobs:
           python -m pytest -q
           tests/test_integration.py
           tests/test_frontend_runtime.py
+          tests/test_source_lifecycle.py
+          tests/test_source_lifecycle_auth.py
+          tests/test_source_lifecycle_rollback.py
           tests/test_config_flow_runtime.py
           tests/test_scrape_flow_runtime.py
           tests/test_runtime_semantics.py

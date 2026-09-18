@@ -47,7 +47,7 @@ async def async_register_frontend(hass: HomeAssistant) -> None:
                     "name": PANEL_ELEMENT,
                     "embed_iframe": False,
                     "trust_external": False,
-                    "js_url": f"{FRONTEND_URL}/web-data-assistant-panel.js",
+                    "js_url": f"{FRONTEND_URL}/web-data-assistant-panel-entry.js",
                 }
             },
             require_admin=True,
