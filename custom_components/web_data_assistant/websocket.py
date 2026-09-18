@@ -100,6 +100,46 @@ def _compact_preview(value: Any, limit: int = 180) -> str:
     return text if len(text) <= limit else f"{text[: limit - 1]}…"
 
 
+def _json_object_nodes(value: Any) -> list[dict[str, Any]]:
+    """Return bounded object-node metadata for guided subtree selection."""
+    nodes: list[dict[str, Any]] = []
+    max_nodes = 200
+
+    def walk(current: Any, path: str) -> None:
+        if len(nodes) >= max_nodes:
+            return
+        if isinstance(current, dict):
+            fields = [
+                {
+                    "name": str(name),
+                    "path": (
+                        f"{path}/{_escape_pointer_part(str(name))}"
+                        if path
+                        else f"/{_escape_pointer_part(str(name))}"
+                    ),
+                    "preview": _compact_preview(child),
+                    "value_type": type(child).__name__,
+                }
+                for name, child in current.items()
+            ]
+            nodes.append({"path": path, "fields": fields})
+            for field, child in zip(fields, current.values(), strict=False):
+                if isinstance(child, (dict, list)):
+                    walk(child, field["path"])
+            return
+
+        if isinstance(current, list):
+            for index, child in enumerate(current):
+                if len(nodes) >= max_nodes:
+                    return
+                if isinstance(child, (dict, list)):
+                    child_path = f"{path}/{index}" if path else f"/{index}"
+                    walk(child, child_path)
+
+    walk(value, "")
+    return nodes
+
+
 _COMMON_FIELDS: dict[Any, Any] = {
     vol.Required(CONF_URL): _http_url,
     vol.Optional(CONF_METHOD, default=METHOD_GET): vol.In([METHOD_GET, METHOD_POST]),
@@ -206,17 +246,10 @@ async def websocket_preview_json(
         for candidate in discovered
     ]
 
+    object_nodes = _json_object_nodes(response.json_data)
     root_fields: list[dict[str, Any]] = []
-    if isinstance(response.json_data, dict):
-        root_fields = [
-            {
-                "name": str(name),
-                "path": f"/{_escape_pointer_part(str(name))}",
-                "preview": _compact_preview(value),
-                "value_type": type(value).__name__,
-            }
-            for name, value in response.json_data.items()
-        ]
+    if object_nodes and object_nodes[0]["path"] == "":
+        root_fields = object_nodes[0]["fields"]
 
     connection.send_result(
         msg["id"],
@@ -227,6 +260,7 @@ async def websocket_preview_json(
             "truncated": truncated,
             "root_type": type(response.json_data).__name__,
             "root_fields": root_fields,
+            "object_nodes": object_nodes,
         },
     )
 
