@@ -55,6 +55,7 @@ async def test_guided_scrape_flow_finds_visible_text_and_persists_selector(
         text=(
             '<html><body><main><h1>Status</h1>'
             '<span class="service-status">Online</span>'
+            '<span class="availability">99%</span>'
             '</main></body></html>'
         ),
         json_data=None,
@@ -82,6 +83,35 @@ async def test_guided_scrape_flow_finds_visible_text_and_persists_selector(
         {CONF_SEARCH_TEXT: "Online"},
     )
     assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "scrape_value"
+
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        {
+            "sensor_name": "Service Status",
+            "unit": "",
+            "add_another": True,
+        },
+    )
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "scrape_search"
+
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        {CONF_SEARCH_TEXT: "99%"},
+    )
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "scrape_value"
+
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        {
+            "sensor_name": "Availability",
+            "unit": "%",
+            "add_another": False,
+        },
+    )
+    assert result["type"] is FlowResultType.FORM
     assert result["step_id"] == "behaviour"
 
     result = await hass.config_entries.flow.async_configure(
@@ -101,8 +131,14 @@ async def test_guided_scrape_flow_finds_visible_text_and_persists_selector(
     assert data[CONF_FAILURE_MODE] == FAILURE_UNAVAILABLE
 
     entities = data[CONF_ENTITIES]
-    assert len(entities) == 1
-    entity = entities[0]
-    assert entity[CONF_SELECTOR] == "span.service-status"
-    assert entity[CONF_INDEX] == 0
-    assert entity[CONF_VALUE_TYPE] == VALUE_TEXT
+    assert len(entities) == 2
+    status, availability = entities
+    assert status["name"] == "Service Status"
+    assert status[CONF_SELECTOR] == "span.service-status"
+    assert status[CONF_INDEX] == 0
+    assert status[CONF_VALUE_TYPE] == VALUE_TEXT
+    assert availability["name"] == "Availability"
+    assert availability[CONF_SELECTOR] == "span.availability"
+    assert availability[CONF_INDEX] == 0
+    assert availability[CONF_VALUE_TYPE] == VALUE_TEXT
+    assert availability["unit"] == "%"
