@@ -194,8 +194,23 @@ if (WebDataAssistantSetupUxPanel && !WebDataAssistantSetupUxPanel.prototype.__se
   };
 
   WebDataAssistantSetupUxPanel.prototype._render = function () {
+    const existingEditor = this.shadowRoot?.querySelector(".header-editor");
+    const existingTextarea = this.shadowRoot?.getElementById("headers");
+    const advancedWasOpen = Boolean(
+      existingEditor?.closest("details")?.open
+      || existingTextarea?.closest("details")?.open
+    );
+    const rawWasOpen = Boolean(this.shadowRoot?.querySelector(".raw-headers")?.open);
+
     originalRender.call(this);
+
+    const newTextarea = this.shadowRoot?.getElementById("headers");
+    const advanced = newTextarea?.closest("details");
+    if (advanced && advancedWasOpen) advanced.open = true;
+
     this._decorateHeaderEditor();
+    const raw = this.shadowRoot?.querySelector(".raw-headers");
+    if (raw && rawWasOpen) raw.open = true;
     this._bindHeaderEditor();
   };
 
