@@ -127,6 +127,12 @@ if (WebDataAssistantSetupUxPanel && !WebDataAssistantSetupUxPanel.prototype.__se
   };
 
   WebDataAssistantSetupUxPanel.prototype._longTextPolicyLabel = function (entity) {
+    if (this._sourceType === "json" && entity.path === undefined && Object.keys(entity.attributes || {}).length) {
+      return "Structured JSON values are stored as attributes, so Home Assistant's 255-character state limit does not apply to those attribute values.";
+    }
+    if (entity.value_type === "json") {
+      return "The JSON document is stored as structured attributes rather than as a long Home Assistant state.";
+    }
     const policy = entity.long_text_policy || this._form.longTextPolicy || "truncate";
     if (policy === "attribute_only") return "If longer than 255 characters: state becomes Loaded and the full value is kept in full_value.";
     if (policy === "unavailable") return "If longer than 255 characters: mark this sensor unavailable.";
@@ -141,7 +147,6 @@ if (WebDataAssistantSetupUxPanel && !WebDataAssistantSetupUxPanel.prototype.__se
 
   WebDataAssistantSetupUxPanel.prototype._previewEntityHtml = function (entity) {
     const state = this._previewStateForEntity(entity);
-    const unit = entity.unit ? " " + entity.unit : "";
     const attributes = Object.entries(entity.attributes || {});
     const visibleAttributes = attributes.slice(0, 12);
     const attributeRows = visibleAttributes.map(([name, path]) =>
@@ -157,7 +162,7 @@ if (WebDataAssistantSetupUxPanel && !WebDataAssistantSetupUxPanel.prototype.__se
     return '<div class="ha-preview-entity">'
       + '<div class="ha-preview-entity-head"><div><strong>' + this._html(entity.name || "Web data sensor") + '</strong><div class="hint">Sensor</div></div>'
       + (entity.unit ? '<span class="hint">Unit: ' + this._html(entity.unit) + '</span>' : '') + '</div>'
-      + '<div class="ha-preview-state"><span class="ha-preview-label">State</span><span class="ha-preview-value"><code>' + this._html(state) + '</code>' + this._html(unit) + '</span></div>'
+      + '<div class="ha-preview-state"><span class="ha-preview-label">State</span><span class="ha-preview-value"><code>' + this._html(state) + '</code></span></div>'
       + attributesHtml
       + '<div class="ha-preview-policy">' + this._html(this._longTextPolicyLabel(entity)) + '</div>'
       + '<details><summary>Technical details</summary><p class="hint">Stable entity key: <code>' + this._html(entity.key || "") + '</code></p></details>'
@@ -310,7 +315,7 @@ if (WebDataAssistantSetupUxPanel && !WebDataAssistantSetupUxPanel.prototype.__se
           name:String(name),
           value:String(value),
         }));
-        this._headerRowsSource = null;
+        this._headerRowsSource = this._form.headers;
         this._syncHeadersFromRows();
         this._error = "";
         this._render();
