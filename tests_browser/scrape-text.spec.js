@@ -238,3 +238,35 @@ test("multiple scraped values become separate sensors from one source", async ({
     },
   ]);
 });
+
+
+test("the same scraped page element cannot be added twice", async ({ page }) => {
+  await mountPanel(page, {
+    "web_data_assistant/search_html": {
+      matches: [
+        {
+          selector: ".temperature",
+          index: 0,
+          text: "14°C",
+          context: "Carlow 14°C",
+          tag: "span",
+        },
+      ],
+    },
+  });
+
+  const shadow = page.locator("web-data-assistant-panel").locator(":scope");
+  await shadow.getByRole("button", { name: /Web page/ }).click();
+  await shadow.getByLabel("Source name").fill("Carlow Weather");
+  await shadow.getByLabel("URL").fill("https://example.test/weather");
+
+  for (const name of ["Temperature", "Temperature Copy"]) {
+    await shadow.getByLabel("Current text or value").fill("14°C");
+    await shadow.getByRole("button", { name: "Find matches" }).click();
+    await shadow.getByLabel("Sensor name").fill(name);
+    await shadow.getByRole("button", { name: "Add sensor" }).click();
+  }
+
+  await expect(shadow.locator(".error")).toContainText("That page value has already been added.");
+  await expect(shadow.locator(".scrape-value")).toHaveCount(1);
+});
