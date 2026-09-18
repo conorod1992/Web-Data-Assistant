@@ -40,6 +40,8 @@ class WebDataCoordinator(DataUpdateCoordinator[ExtractionResult]):
         self.client = WebDataClient(hass)
         self.last_successful_update: datetime | None = None
         self.last_source_error: str | None = None
+        self._etag: str | None = None
+        self._last_modified: str | None = None
 
         interval_minutes = int(
             entry.options.get(
@@ -64,18 +66,39 @@ class WebDataCoordinator(DataUpdateCoordinator[ExtractionResult]):
     async def _async_update_data(self) -> ExtractionResult:
         """Fetch and extract all configured values."""
         source_type = self.entry.data[CONF_SOURCE_TYPE]
+        method = self.entry.data.get(CONF_METHOD, METHOD_GET)
+        conditional_get = str(method).upper() == METHOD_GET
         try:
             response = await self.client.async_fetch(
                 self.entry.data[CONF_URL],
-                method=self.entry.data.get(CONF_METHOD, METHOD_GET),
+                method=method,
                 headers=self.entry.data.get(CONF_HEADERS),
                 payload=self.entry.data.get(CONF_PAYLOAD),
                 verify_ssl=self.entry.data.get(CONF_VERIFY_SSL, True),
                 parse_json=source_type == SOURCE_JSON,
+                etag=self._etag if conditional_get else None,
+                last_modified=self._last_modified if conditional_get else None,
             )
         except WebDataError as err:
             self.last_source_error = str(err)
             raise UpdateFailed(str(err)) from err
+
+        if response.not_modified:
+            if self.data is None:
+                self.last_source_error = "Source returned HTTP 304 before any data was loaded"
+                raise UpdateFailed(self.last_source_error)
+            self._etag = response.etag or self._etag
+            self._last_modified = response.last_modified or self._last_modified
+            self.last_successful_update = dt_util.utcnow()
+            self.last_source_error = None
+            return self.data
+
+        if conditional_get:
+            self._etag = response.etag
+            self._last_modified = response.last_modified
+        else:
+            self._etag = None
+            self._last_modified = None
 
         entity_configs = self.entity_configs
         if source_type == SOURCE_JSON:
