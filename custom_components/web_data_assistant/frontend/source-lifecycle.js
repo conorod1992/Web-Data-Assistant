@@ -89,6 +89,20 @@ if (WebDataAssistantPanel && !WebDataAssistantPanel.prototype.__sourceLifecycleI
     };
 
     if (this._sourceType === "scrape") {
+      if (Array.isArray(this._scrapeSelections)) {
+        this._scrapeSelections = this._editingOriginalEntities.map((entity) => ({
+          selector: entity.selector,
+          index: Number(entity.index || 0),
+          text: entity.name || "Existing selected value",
+          context: "Stored page value",
+          name: entity.name || "Web value",
+          unit: entity.unit || "",
+          longTextPolicy: entity.long_text_policy || "",
+        }));
+        this._selectedExtraction = null;
+        return;
+      }
+
       const entity = this._editingOriginalEntities[0];
       if (entity) {
         this._selectedExtraction = {
@@ -228,7 +242,18 @@ if (WebDataAssistantPanel && !WebDataAssistantPanel.prototype.__sourceLifecycleI
     if ((!this._editingEntryId && !this._duplicateMode) || !this._editingOriginalEntities?.length) return built;
 
     if (this._sourceType === "scrape") {
-      if (built[0] && this._editingOriginalEntities[0]?.key) built[0].key = this._editingOriginalEntities[0].key;
+      const originalByExtraction = new Map(
+        this._editingOriginalEntities.map((entity) => [
+          `${entity.selector || ""}::${Number(entity.index || 0)}`,
+          entity,
+        ])
+      );
+      built.forEach((entity) => {
+        const original = originalByExtraction.get(
+          `${entity.selector || ""}::${Number(entity.index || 0)}`
+        );
+        if (original?.key) entity.key = original.key;
+      });
       return built;
     }
 
