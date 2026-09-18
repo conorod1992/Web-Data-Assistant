@@ -11,7 +11,9 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 from custom_components.web_data_assistant.const import (
     CONF_ENTITIES,
     CONF_FAILURE_MODE,
+    CONF_INDEX,
     CONF_PATH,
+    CONF_SELECTOR,
     CONF_SOURCE_NAME,
     CONF_SOURCE_TYPE,
     CONF_URL,
@@ -19,7 +21,9 @@ from custom_components.web_data_assistant.const import (
     DOMAIN,
     FAILURE_UNAVAILABLE,
     SOURCE_JSON,
+    SOURCE_SCRAPE,
     VALUE_NUMBER,
+    VALUE_TEXT,
 )
 from custom_components.web_data_assistant.models import FetchResponse
 
@@ -180,3 +184,83 @@ async def test_repair_json_entity_updates_only_selected_path_and_preserves_ident
     assert temperature_state.state == "14.6"
     assert humidity_state is not None
     assert humidity_state.state == "unavailable"
+
+
+async def test_repair_scrape_entity_replaces_selector_and_preserves_identity(
+    hass: HomeAssistant,
+    hass_ws_client,
+) -> None:
+    """Repair a broken scrape selector without recreating the Home Assistant entity."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Status Page",
+        data={
+            CONF_SOURCE_NAME: "Status Page",
+            CONF_SOURCE_TYPE: SOURCE_SCRAPE,
+            CONF_URL: "https://example.test/status",
+            CONF_FAILURE_MODE: FAILURE_UNAVAILABLE,
+            CONF_ENTITIES: [
+                {
+                    "key": "service_status",
+                    "name": "Service Status",
+                    CONF_SELECTOR: ".old-status",
+                    CONF_INDEX: 0,
+                    CONF_VALUE_TYPE: VALUE_TEXT,
+                }
+            ],
+        },
+    )
+    entry.add_to_hass(hass)
+    fetch = AsyncMock(
+        return_value=FetchResponse(
+            status=200,
+            content_type="text/html",
+            text='<html><body><span class="new-status">Online</span></body></html>',
+            json_data=None,
+        )
+    )
+
+    with patch(
+        "custom_components.web_data_assistant.client.WebDataClient.async_fetch",
+        new=fetch,
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        registry = er.async_get(hass)
+        entity_id = registry.async_get_entity_id(
+            "sensor", DOMAIN, f"{entry.entry_id}_service_status"
+        )
+        assert entity_id is not None
+
+        client = await hass_ws_client(hass)
+        await client.send_json(
+            {
+                "id": 1,
+                "type": f"{DOMAIN}/repair_entity",
+                "entry_id": entry.entry_id,
+                "entity_key": "service_status",
+                CONF_SELECTOR: ".new-status",
+                CONF_INDEX: 0,
+            }
+        )
+        message = await client.receive_json()
+        await hass.async_block_till_done()
+
+    assert message["success"] is True
+    updated = hass.config_entries.async_get_entry(entry.entry_id)
+    assert updated is not None
+    entity = updated.data[CONF_ENTITIES][0]
+    assert entity[CONF_SELECTOR] == ".new-status"
+    assert entity[CONF_INDEX] == 0
+
+    registry = er.async_get(hass)
+    assert (
+        registry.async_get_entity_id(
+            "sensor", DOMAIN, f"{entry.entry_id}_service_status"
+        )
+        == entity_id
+    )
+    state = hass.states.get(entity_id)
+    assert state is not None
+    assert state.state == "Online"
