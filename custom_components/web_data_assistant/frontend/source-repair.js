@@ -60,7 +60,7 @@ if (WebDataAssistantPanel && !WebDataAssistantPanel.prototype.__sourceRepairInst
   WebDataAssistantPanel.prototype._renderSave = function () {
     if (!this._repairMode) return originalRenderSave.call(this);
     const ready = this._repairMode.sourceType === "json"
-      ? Boolean(this._repairJsonPath)
+      ? this._repairJsonPath !== null
       : Boolean(this._repairSelectedMatch);
     return `<section class="card save-card"><div class="heading" style="margin:0;align-items:center;"><div><h2 style="margin-bottom:4px;">Repair ${this._html(this._repairMode.name)}</h2><p style="margin:0;">Only this extraction is changed. The entity key and Home Assistant identity stay the same.</p></div><div class="actions" style="margin-top:0;"><button id="cancel-repair" class="secondary" ${this._repairSaving ? "disabled" : ""}>Cancel</button><button id="apply-repair" class="primary" ${!ready || this._repairSaving ? "disabled" : ""}>${this._repairSaving ? "Repairing…" : "Apply repair"}</button></div></div></section>`;
   };
@@ -130,7 +130,7 @@ if (WebDataAssistantPanel && !WebDataAssistantPanel.prototype.__sourceRepairInst
         sourceType:config.source_type,
         entity:structuredClone(entity),
       };
-      this._repairJsonPath = "";
+      this._repairJsonPath = null;
       this._repairJsonFilter = "";
       this._repairHtmlSearchText = "";
       this._repairHtmlMatches = [];
@@ -209,7 +209,7 @@ if (WebDataAssistantPanel && !WebDataAssistantPanel.prototype.__sourceRepairInst
       entity_key:this._repairMode.entityKey,
     };
     if (this._repairMode.sourceType === "json") {
-      if (!this._repairJsonPath) return;
+      if (this._repairJsonPath === null) return;
       message.path = this._repairJsonPath;
     } else {
       if (!this._repairSelectedMatch) return;
@@ -229,7 +229,7 @@ if (WebDataAssistantPanel && !WebDataAssistantPanel.prototype.__sourceRepairInst
         );
       }
       this._repairMode = null;
-      this._repairJsonPath = "";
+      this._repairJsonPath = null;
       this._repairSelectedMatch = null;
       if (typeof this._resetLifecycleForm === "function") this._resetLifecycleForm();
       else this._resetResults();
