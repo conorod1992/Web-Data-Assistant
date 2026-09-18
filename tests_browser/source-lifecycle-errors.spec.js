@@ -9,11 +9,16 @@ const LIFECYCLE_SCRIPT = path.resolve(
   __dirname,
   "../custom_components/web_data_assistant/frontend/source-lifecycle.js"
 );
+const SETUP_UX_SCRIPT = path.resolve(
+  __dirname,
+  "../custom_components/web_data_assistant/frontend/source-setup-ux.js"
+);
 
 test("failed source edit keeps the populated edit form available", async ({ page }) => {
   await page.setContent("<web-data-assistant-panel></web-data-assistant-panel>");
   await page.addScriptTag({ path: PANEL_SCRIPT });
   await page.addScriptTag({ path: LIFECYCLE_SCRIPT });
+  await page.addScriptTag({ path: SETUP_UX_SCRIPT });
   await page.evaluate(() => {
     const panel = document.querySelector("web-data-assistant-panel");
     panel.hass = {
@@ -88,4 +93,5 @@ test("failed source edit keeps the populated edit form available", async ({ page
   await expect(shadow.getByLabel("Update interval (minutes)")).toHaveValue("20");
   await expect(shadow.getByRole("button", { name: "Save changes" })).toBeVisible();
   await expect(shadow.getByRole("button", { name: "Cancel edit" })).toBeVisible();
+  await expect(shadow.locator(".ha-create-preview")).toContainText("My edited weather");
 });
