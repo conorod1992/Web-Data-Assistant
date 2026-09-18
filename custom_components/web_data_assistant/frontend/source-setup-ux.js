@@ -15,6 +15,15 @@ if (WebDataAssistantSetupUxPanel && !WebDataAssistantSetupUxPanel.prototype.__se
       .header-tools { display:flex; flex-wrap:wrap; gap:10px; align-items:center; }
       .raw-headers { margin-top:0; padding-top:0; border-top:0; }
       .raw-headers textarea { margin-top:10px; }
+      .ha-preview-list { display:flex; flex-direction:column; gap:10px; }
+      .ha-preview-entity { padding:14px; border:1px solid var(--divider-color); border-radius:10px; background:var(--secondary-background-color); }
+      .ha-preview-entity-head { display:flex; justify-content:space-between; gap:12px; align-items:start; }
+      .ha-preview-state { display:grid; grid-template-columns:90px minmax(0,1fr); gap:8px; margin-top:10px; align-items:start; }
+      .ha-preview-label { color:var(--secondary-text-color); font-size:12px; }
+      .ha-preview-value { overflow-wrap:anywhere; }
+      .ha-preview-attrs { margin-top:10px; padding-top:10px; border-top:1px solid var(--divider-color); }
+      .ha-preview-attr { display:grid; grid-template-columns:minmax(100px,.45fr) minmax(0,1fr); gap:8px; padding:4px 0; }
+      .ha-preview-policy { margin-top:10px; color:var(--secondary-text-color); font-size:12px; }
       @media(max-width:650px) {
         .header-row { grid-template-columns:1fr; }
         .header-row button { justify-self:start; }
@@ -95,6 +104,103 @@ if (WebDataAssistantSetupUxPanel && !WebDataAssistantSetupUxPanel.prototype.__se
       + '<p class="hint">For advanced use or pasting an existing headers object. Applying valid JSON replaces the rows above.</p></details>';
   };
 
+  WebDataAssistantSetupUxPanel.prototype._jsonPreviewForPath = function (path) {
+    const candidates = this._jsonResult?.values || [];
+    const candidate = candidates.find((item) => item.path === path);
+    if (candidate) return candidate.preview;
+
+    const rootField = (this._jsonResult?.root_fields || []).find((item) => item.path === path);
+    if (rootField) return rootField.preview;
+
+    if (path === "" && this._jsonResult) return "Structured response";
+    return "Current value unavailable in setup preview";
+  };
+
+  WebDataAssistantSetupUxPanel.prototype._scrapePreviewForEntity = function (entity) {
+    const item = (this._scrapeSelections || []).find((candidate) =>
+      candidate.selector === entity.selector
+      && Number(candidate.index || 0) === Number(entity.index || 0)
+    );
+    if (!item) return "Current value will be read from the page";
+    if (item.context === "Stored page value") return "Current value will be read from the page";
+    return item.text || "Current value will be read from the page";
+  };
+
+  WebDataAssistantSetupUxPanel.prototype._longTextPolicyLabel = function (entity) {
+    const policy = entity.long_text_policy || this._form.longTextPolicy || "truncate";
+    if (policy === "attribute_only") return "If longer than 255 characters: state becomes Loaded and the full value is kept in full_value.";
+    if (policy === "unavailable") return "If longer than 255 characters: mark this sensor unavailable.";
+    return "If longer than 255 characters: shorten the state and preserve the complete value in full_value.";
+  };
+
+  WebDataAssistantSetupUxPanel.prototype._previewStateForEntity = function (entity) {
+    if (entity.value_type === "json" || entity.path === undefined) return "Loaded";
+    if (this._sourceType === "scrape") return this._scrapePreviewForEntity(entity);
+    return this._jsonPreviewForPath(entity.path);
+  };
+
+  WebDataAssistantSetupUxPanel.prototype._previewEntityHtml = function (entity) {
+    const state = this._previewStateForEntity(entity);
+    const unit = entity.unit ? " " + entity.unit : "";
+    const attributes = Object.entries(entity.attributes || {});
+    const visibleAttributes = attributes.slice(0, 12);
+    const attributeRows = visibleAttributes.map(([name, path]) =>
+      '<div class="ha-preview-attr"><code>' + this._html(name) + '</code><span class="ha-preview-value">' + this._html(this._jsonPreviewForPath(path)) + '</span></div>'
+    ).join("");
+    const more = attributes.length > visibleAttributes.length
+      ? '<div class="hint">…and ' + (attributes.length - visibleAttributes.length) + ' more attribute' + (attributes.length - visibleAttributes.length === 1 ? '' : 's') + '.</div>'
+      : "";
+    const attributesHtml = attributes.length
+      ? '<div class="ha-preview-attrs"><div class="ha-preview-label">' + attributes.length + ' attribute' + (attributes.length === 1 ? '' : 's') + '</div>' + attributeRows + more + '</div>'
+      : "";
+
+    return '<div class="ha-preview-entity">'
+      + '<div class="ha-preview-entity-head"><div><strong>' + this._html(entity.name || "Web data sensor") + '</strong><div class="hint">Sensor</div></div>'
+      + (entity.unit ? '<span class="hint">Unit: ' + this._html(entity.unit) + '</span>' : '') + '</div>'
+      + '<div class="ha-preview-state"><span class="ha-preview-label">State</span><span class="ha-preview-value"><code>' + this._html(state) + '</code>' + this._html(unit) + '</span></div>'
+      + attributesHtml
+      + '<div class="ha-preview-policy">' + this._html(this._longTextPolicyLabel(entity)) + '</div>'
+      + '<details><summary>Technical details</summary><p class="hint">Stable entity key: <code>' + this._html(entity.key || "") + '</code></p></details>'
+      + '</div>';
+  };
+
+  WebDataAssistantSetupUxPanel.prototype._creationPreviewHtml = function () {
+    if (this._repairMode) return "";
+    let entities = [];
+    try {
+      entities = this._entities();
+    } catch (_err) {
+      return "";
+    }
+    if (!entities.length) return "";
+
+    return '<section class="card ha-create-preview"><div class="heading"><div><h2>What Home Assistant will create</h2>'
+      + '<p>This preview is built from the same entity definitions that will be sent when you save.</p></div></div>'
+      + '<div class="ha-preview-list">' + entities.map((entity) => this._previewEntityHtml(entity)).join("") + '</div></section>';
+  };
+
+  WebDataAssistantSetupUxPanel.prototype._refreshCreationPreview = function () {
+    const current = this.shadowRoot.querySelector(".ha-create-preview");
+    const html = this._creationPreviewHtml();
+    if (!html) {
+      current?.remove();
+      return;
+    }
+
+    const holder = document.createElement("div");
+    holder.innerHTML = html;
+    const replacement = holder.firstElementChild;
+    if (!replacement) return;
+
+    if (current) {
+      current.replaceWith(replacement);
+      return;
+    }
+
+    const save = this.shadowRoot.querySelector(".save-card");
+    if (save) save.before(replacement);
+  };
+
   WebDataAssistantSetupUxPanel.prototype._decorateHeaderEditor = function () {
     const textarea = this.shadowRoot.getElementById("headers");
     if (!textarea) return;
@@ -111,6 +217,30 @@ if (WebDataAssistantSetupUxPanel && !WebDataAssistantSetupUxPanel.prototype.__se
         element.disabled = true;
       });
     }
+  };
+
+  WebDataAssistantSetupUxPanel.prototype._bindCreationPreview = function () {
+    const selectors = [
+      "#name",
+      ".json-name",
+      ".json-unit",
+      ".json-long-text",
+      ".json-attribute-name",
+      ".json-state",
+      "#aggregate-unit",
+      "#aggregate-long-text",
+      ".scrape-added-name",
+      ".scrape-added-unit",
+      ".scrape-added-long-text",
+      "#long-text-policy",
+    ].join(",");
+
+    this.shadowRoot.querySelectorAll(selectors).forEach((element) => {
+      const eventName = element.tagName === "SELECT" || element.type === "radio" ? "change" : "input";
+      element.addEventListener(eventName, () => {
+        queueMicrotask(() => this._refreshCreationPreview());
+      });
+    });
   };
 
   WebDataAssistantSetupUxPanel.prototype._bindHeaderEditor = function () {
@@ -212,6 +342,8 @@ if (WebDataAssistantSetupUxPanel && !WebDataAssistantSetupUxPanel.prototype.__se
     const raw = this.shadowRoot?.querySelector(".raw-headers");
     if (raw && rawWasOpen) raw.open = true;
     this._bindHeaderEditor();
+    this._refreshCreationPreview();
+    this._bindCreationPreview();
   };
 
   WebDataAssistantSetupUxPanel.prototype._request = function () {
