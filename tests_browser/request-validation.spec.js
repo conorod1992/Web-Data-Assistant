@@ -5,10 +5,15 @@ const PANEL_SCRIPT = path.resolve(
   __dirname,
   "../custom_components/web_data_assistant/frontend/web-data-assistant-panel.js"
 );
+const SETUP_UX_SCRIPT = path.resolve(
+  __dirname,
+  "../custom_components/web_data_assistant/frontend/source-setup-ux.js"
+);
 
-test("invalid headers JSON is rejected before a preview request is sent", async ({ page }) => {
+test("invalid raw headers JSON is rejected before a preview request is sent", async ({ page }) => {
   await page.setContent("<web-data-assistant-panel></web-data-assistant-panel>");
   await page.addScriptTag({ path: PANEL_SCRIPT });
+  await page.addScriptTag({ path: SETUP_UX_SCRIPT });
   await page.evaluate(() => {
     window.__webDataMessages = [];
     const panel = document.querySelector("web-data-assistant-panel");
@@ -25,8 +30,9 @@ test("invalid headers JSON is rejected before a preview request is sent", async 
   await shadow.getByLabel("Source name").fill("Broken headers");
   await shadow.getByLabel("URL").fill("https://example.test/data");
   await shadow.getByText("Advanced request settings", { exact: true }).click();
-  await shadow.getByLabel("Headers (JSON object)").fill('{"Authorization":');
-  await shadow.getByRole("button", { name: "Load JSON" }).click();
+  await shadow.getByText("Raw headers JSON", { exact: true }).click();
+  await shadow.getByLabel("Raw headers JSON").fill('{"Authorization":');
+  await shadow.getByRole("button", { name: "Apply JSON" }).click();
 
   await expect(shadow.locator(".error")).toContainText("Headers must be a valid JSON object.");
   const previewCalls = await page.evaluate(() =>
