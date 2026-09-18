@@ -1,0 +1,153 @@
+name: Release
+
+run-name: Release v${{ inputs.version }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version without a leading v (for example 0.2.0)"
+        required: true
+        type: string
+      prerelease:
+        description: "Mark the GitHub release as a pre-release"
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: web-data-assistant-release
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: Validate release candidate
+    uses: ./.github/workflows/validate.yml
+
+  release:
+    name: Publish v${{ inputs.version }}
+    needs: validate
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Check out validated main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Set up Python 3.14
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      - name: Verify main has not moved
+        shell: bash
+        env:
+          VALIDATED_SHA: ${{ github.sha }}
+        run: |
+          git fetch origin main --tags
+          CURRENT_MAIN="$(git rev-parse origin/main)"
+          if [ "$CURRENT_MAIN" != "$VALIDATED_SHA" ]; then
+            echo "::error::main moved after this release run started. Re-run the Release workflow so the new main commit is validated first."
+            echo "Validated: $VALIDATED_SHA"
+            echo "Current:   $CURRENT_MAIN"
+            exit 1
+          fi
+
+      - name: Validate release version
+        id: version
+        shell: bash
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import re
+          from pathlib import Path
+
+          version = os.environ["RELEASE_VERSION"].strip()
+          if not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?", version):
+              raise SystemExit(
+                  "Version must look like 0.2.0 or 0.2.0-beta.1 and must not include a leading v."
+              )
+
+          manifest_path = Path("custom_components/web_data_assistant/manifest.json")
+          manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+          current = str(manifest.get("version", "")).strip()
+
+          def core(value: str) -> tuple[int, int, int]:
+              match = re.match(r"^(\d+)\.(\d+)\.(\d+)", value)
+              if not match:
+                  raise SystemExit(f"Current manifest version {value!r} is not valid.")
+              return tuple(map(int, match.groups()))
+
+          if current and core(version) < core(current):
+              raise SystemExit(
+                  f"Refusing to lower manifest version from {current} to {version}."
+              )
+
+          changed = current != version
+          manifest["version"] = version
+          manifest_path.write_text(
+              json.dumps(manifest, indent=2, ensure_ascii=False) + "\n",
+              encoding="utf-8",
+          )
+
+          output = Path(os.environ["GITHUB_OUTPUT"])
+          with output.open("a", encoding="utf-8") as handle:
+              handle.write(f"version={version}\n")
+              handle.write(f"changed={'true' if changed else 'false'}\n")
+
+          print(f"Manifest version: {current or '(missing)'} -> {version}")
+          PY
+
+          if git rev-parse "refs/tags/v${RELEASE_VERSION}" >/dev/null 2>&1; then
+            echo "::error::Tag v${RELEASE_VERSION} already exists."
+            exit 1
+          fi
+
+      - name: Commit version bump
+        if: steps.version.outputs.changed == 'true'
+        shell: bash
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add custom_components/web_data_assistant/manifest.json
+          git commit -m "chore: release v${RELEASE_VERSION}"
+          git push origin HEAD:main
+
+      - name: Create release tag
+        shell: bash
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          git tag -a "v${RELEASE_VERSION}" -m "Web Data Assistant v${RELEASE_VERSION}"
+          git push origin "v${RELEASE_VERSION}"
+
+      - name: Create GitHub release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+          PRERELEASE: ${{ inputs.prerelease }}
+        run: |
+          args=(
+            "v${RELEASE_VERSION}"
+            --title "v${RELEASE_VERSION}"
+            --generate-notes
+            --verify-tag
+          )
+          if [ "$PRERELEASE" = "true" ]; then
+            args+=(--prerelease)
+          fi
+          gh release create "${args[@]}"

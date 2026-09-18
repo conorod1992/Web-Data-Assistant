@@ -269,6 +269,18 @@ The Chromium tests mock the panel's `hass.callWS` boundary so they remain determ
 
 To run the Home Assistant runtime suite locally, install `requirements-test.txt` and run the pytest files under `tests/`. Browser tests use `npm install`, `npx playwright install chromium`, and `npm run test:browser`.
 
+## Releases
+
+Releases are published through the manual **Release** GitHub Actions workflow.
+
+1. Open **Actions → Release → Run workflow** on `main`.
+2. Enter the semantic version without a leading `v` (for example `0.2.0` or `0.2.0-beta.1`).
+3. Optionally mark it as a pre-release.
+4. The workflow runs the full validation suite first.
+5. If validation succeeds and `main` has not changed, it updates `custom_components/web_data_assistant/manifest.json`, commits the version bump when needed, creates the matching `v<version>` tag, and publishes a GitHub Release with generated notes.
+
+HACS can consume the tagged GitHub release directly. This repository does not use HACS release-asset ZIP mode, so a separately packaged ZIP asset is not required.
+
 ## Installation
 
 The integration contains HACS metadata, but it has not yet been prepared as a production release. For development, place `custom_components/web_data_assistant` in the Home Assistant `custom_components` directory and restart Home Assistant.
