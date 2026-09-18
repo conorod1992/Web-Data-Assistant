@@ -39,7 +39,7 @@ test("switching source type clears loaded JSON data and selection", async ({ pag
 
   await shadow.getByRole("button", { name: /Web page/ }).click();
 
-  await expect(shadow.getByRole("heading", { name: "2. Find the value", level: 2 })).toBeVisible();
+  await expect(shadow.getByRole("heading", { name: "2. Choose values from this page", level: 2 })).toBeVisible();
   await expect(shadow.locator(".json-row")).toHaveCount(0);
   await expect(shadow.getByRole("button", { name: "Create in Home Assistant" })).toBeDisabled();
 

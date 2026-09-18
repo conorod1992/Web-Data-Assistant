@@ -38,9 +38,13 @@ The primary scrape workflow deliberately does **not** try to render the remote p
 3. Find the value you want and enter its current visible text into Web Data Assistant.
 4. Home Assistant fetches the page in the background and finds the smallest meaningful HTML elements containing that text.
 5. If several matches are found, choose the correct one using the surrounding-text context shown for each result.
-6. Web Data Assistant generates and stores the CSS selector and match index internally.
+6. Give the selected value a sensor name and optional unit, then add it to the source.
+7. Search for and add more values from the same page if needed.
+8. Web Data Assistant generates and stores each CSS selector and match index internally.
 
 The text entered during setup is only an identification aid. Runtime extraction uses the generated selector/index, so the value is free to change on later polls.
+
+A single web-page source can contain multiple scrape sensors. All values from that page share one HTTP request and one parsed HTML document on each refresh; adding Temperature, Humidity and Wind from the same page does not cause three separate page downloads.
 
 Text search ignores non-visible document content such as scripts, styles, templates and noscript blocks. Generated selector/index details are available only under advanced extraction details and are validated again against a fresh response before the source is created.
 
@@ -218,7 +222,8 @@ A separate runtime suite is pinned to **Home Assistant 2026.9.2** through `pytes
 - keep-last and restore-state behavior across restarts
 - exact stale-age expiry
 - extraction failures remaining distinct from source failures and later recovery
-- multiple values sharing one coordinator fetch and one service device
+- multiple JSON values sharing one coordinator fetch and one service device
+- multiple scrape values sharing one HTTP fetch and one HTML parse
 - JSON state + selected attributes on one entity
 - structured nested JSON dictionaries/lists as entity attributes
 - attribute-only JSON entities using the stable `Loaded` state
@@ -247,6 +252,7 @@ A separate Playwright/Chromium suite renders the actual custom panel JavaScript 
 - one JSON sensor with a selected state plus attributes
 - root-object import with structured attributes
 - text-first scrape matching and ambiguous-match disambiguation
+- multiple scraped values from one page, including add/remove/re-add setup
 - confirmation that the primary scrape panel does not use an iframe
 - source/default long-text handling controls
 - source health, stale retained states and manual refresh

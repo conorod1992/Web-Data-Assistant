@@ -33,6 +33,7 @@ from .const import (
     CONF_SEARCH_TEXT,
     CONF_SOURCE_NAME,
     CONF_SOURCE_TYPE,
+    CONF_UNIT,
     CONF_URL,
     CONF_VERIFY_SSL,
     DEFAULT_FAILURE_MODE,
@@ -69,6 +70,7 @@ class WebDataAssistantConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._json_truncated = False
         self._html_matches: list[HtmlMatch] = []
         self._search_text: str = ""
+        self._pending_html_match: HtmlMatch | None = None
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
@@ -327,17 +329,72 @@ class WebDataAssistantConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         )
 
     async def _async_use_html_match(self, match: HtmlMatch) -> ConfigFlowResult:
-        """Store a selected HTML match and continue the flow."""
-        self._source[CONF_ENTITIES] = [
-            WebDataEntityConfig(
-                key=slugify(self._source[CONF_SOURCE_NAME]) or "web_value",
-                name=self._source[CONF_SOURCE_NAME],
-                selector=match.selector,
-                index=match.index,
-                value_type=VALUE_TEXT,
-            ).as_dict()
-        ]
-        return await self.async_step_behaviour()
+        """Store a selected HTML match temporarily and collect sensor details."""
+        self._pending_html_match = match
+        return await self.async_step_scrape_value()
+
+    async def async_step_scrape_value(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Name one selected page value and optionally add another."""
+        errors: dict[str, str] = {}
+        entities = list(self._source.get(CONF_ENTITIES, []))
+        match = self._pending_html_match
+        if match is None:
+            return await self.async_step_scrape_search()
+
+        if user_input is not None:
+            name = str(user_input.get("sensor_name", "")).strip()
+            if not name:
+                errors["sensor_name"] = "required"
+            elif any(
+                entity.get("selector") == match.selector
+                and int(entity.get("index", 0)) == match.index
+                for entity in entities
+            ):
+                errors["base"] = "duplicate_value"
+            else:
+                entity = WebDataEntityConfig(
+                    key=self._unique_key(name, entities),
+                    name=name,
+                    selector=match.selector,
+                    index=match.index,
+                    unit=str(user_input.get(CONF_UNIT, "")).strip() or None,
+                    value_type=VALUE_TEXT,
+                ).as_dict()
+                entities.append(entity)
+                self._source[CONF_ENTITIES] = entities
+                self._pending_html_match = None
+                self._html_matches = []
+                self._search_text = ""
+                if user_input.get("add_another"):
+                    return await self.async_step_scrape_search()
+                return await self.async_step_behaviour()
+
+        default_name = (
+            self._source[CONF_SOURCE_NAME]
+            if not entities
+            else ""
+        )
+        return self.async_show_form(
+            step_id="scrape_value",
+            data_schema=vol.Schema(
+                {
+                    vol.Required("sensor_name", default=default_name): vol.All(
+                        str,
+                        lambda value: value.strip(),
+                        vol.Length(min=1, max=100),
+                    ),
+                    vol.Optional(CONF_UNIT): str,
+                    vol.Required("add_another", default=False): bool,
+                }
+            ),
+            errors=errors,
+            description_placeholders={
+                "value": match.text or "(selected value)",
+                "count": str(len(entities)),
+            },
+        )
 
     async def async_step_behaviour(
         self, user_input: dict[str, Any] | None = None

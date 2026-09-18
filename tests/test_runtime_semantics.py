@@ -13,6 +13,7 @@ from custom_components.web_data_assistant.const import (
     CONF_ENTITIES,
     CONF_FAILURE_MODE,
     CONF_PATH,
+    CONF_SELECTOR,
     CONF_SOURCE_NAME,
     CONF_SOURCE_TYPE,
     CONF_URL,
@@ -21,8 +22,11 @@ from custom_components.web_data_assistant.const import (
     FAILURE_KEEP_LAST,
     FAILURE_UNAVAILABLE,
     SOURCE_JSON,
+    SOURCE_SCRAPE,
     VALUE_NUMBER,
+    VALUE_TEXT,
 )
+from custom_components.web_data_assistant.extraction import extract_html_entities
 from custom_components.web_data_assistant.models import FetchResponse
 
 
@@ -160,3 +164,133 @@ async def test_multiple_json_sensors_share_fetch_and_service_device(
     assert device.entry_type is dr.DeviceEntryType.SERVICE
     assert device.name == "Weather API"
     assert (DOMAIN, entry.entry_id) in device.identifiers
+
+
+
+async def test_multiple_scrape_sensors_share_fetch_and_html_parse(
+    hass: HomeAssistant,
+) -> None:
+    """Fetch and parse one page once while updating multiple scrape sensors."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Weather Page",
+        data={
+            CONF_SOURCE_NAME: "Weather Page",
+            CONF_SOURCE_TYPE: SOURCE_SCRAPE,
+            CONF_URL: "https://example.test/weather",
+            CONF_FAILURE_MODE: FAILURE_UNAVAILABLE,
+            CONF_ENTITIES: [
+                {
+                    "key": "temperature",
+                    "name": "Temperature",
+                    CONF_SELECTOR: ".temperature",
+                    CONF_VALUE_TYPE: VALUE_TEXT,
+                },
+                {
+                    "key": "humidity",
+                    "name": "Humidity",
+                    CONF_SELECTOR: ".humidity",
+                    CONF_VALUE_TYPE: VALUE_TEXT,
+                },
+            ],
+        },
+    )
+    entry.add_to_hass(hass)
+    response = FetchResponse(
+        status=200,
+        content_type="text/html",
+        text=(
+            '<html><body><span class="temperature">14°C</span>'
+            '<span class="humidity">82%</span></body></html>'
+        ),
+        json_data=None,
+    )
+    fetch = AsyncMock(return_value=response)
+
+    with (
+        patch(
+            "custom_components.web_data_assistant.client.WebDataClient.async_fetch",
+            new=fetch,
+        ),
+        patch(
+            "custom_components.web_data_assistant.coordinator.extract_html_entities",
+            wraps=extract_html_entities,
+        ) as extract_all,
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+    fetch.assert_awaited_once()
+    assert extract_all.call_count == 1
+
+    entity_registry = er.async_get(hass)
+    temperature_id = entity_registry.async_get_entity_id(
+        "sensor", DOMAIN, f"{entry.entry_id}_temperature"
+    )
+    humidity_id = entity_registry.async_get_entity_id(
+        "sensor", DOMAIN, f"{entry.entry_id}_humidity"
+    )
+    assert temperature_id is not None
+    assert humidity_id is not None
+    assert hass.states.get(temperature_id).state == "14°C"
+    assert hass.states.get(humidity_id).state == "82%"
+
+
+
+async def test_multi_scrape_extraction_failure_is_isolated(
+    hass: HomeAssistant,
+) -> None:
+    """Keep valid scrape sensors available when one selector stops matching."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Weather Page",
+        data={
+            CONF_SOURCE_NAME: "Weather Page",
+            CONF_SOURCE_TYPE: SOURCE_SCRAPE,
+            CONF_URL: "https://example.test/weather",
+            CONF_FAILURE_MODE: FAILURE_UNAVAILABLE,
+            CONF_ENTITIES: [
+                {
+                    "key": "temperature",
+                    "name": "Temperature",
+                    CONF_SELECTOR: ".temperature",
+                    CONF_VALUE_TYPE: VALUE_TEXT,
+                },
+                {
+                    "key": "humidity",
+                    "name": "Humidity",
+                    CONF_SELECTOR: ".humidity",
+                    CONF_VALUE_TYPE: VALUE_TEXT,
+                },
+            ],
+        },
+    )
+    entry.add_to_hass(hass)
+    response = FetchResponse(
+        status=200,
+        content_type="text/html",
+        text='<html><body><span class="temperature">14°C</span></body></html>',
+        json_data=None,
+    )
+
+    with patch(
+        "custom_components.web_data_assistant.client.WebDataClient.async_fetch",
+        new=AsyncMock(return_value=response),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+    registry = er.async_get(hass)
+    temperature_id = registry.async_get_entity_id(
+        "sensor", DOMAIN, f"{entry.entry_id}_temperature"
+    )
+    humidity_id = registry.async_get_entity_id(
+        "sensor", DOMAIN, f"{entry.entry_id}_humidity"
+    )
+    assert temperature_id is not None
+    assert humidity_id is not None
+    assert hass.states.get(temperature_id).state == "14°C"
+    assert hass.states.get(humidity_id).state == STATE_UNAVAILABLE
+    assert entry.runtime_data.last_update_success is True
+    assert entry.runtime_data.extraction_error_for("temperature") is None
+    assert entry.runtime_data.extraction_error_for("humidity") is not None

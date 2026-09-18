@@ -73,8 +73,10 @@ test("guided scrape text search disambiguates multiple visible matches", async (
   await expect(shadow.getByText("Yesterday at 13:00 14°C Rain")).toBeVisible();
 
   await shadow.locator(".match").filter({ hasText: "Carlow current weather" }).click();
-  await expect(shadow.getByRole("heading", { name: "Selected value" })).toBeVisible();
-  await shadow.getByLabel("Unit (optional)").fill("°C");
+  await expect(shadow.getByRole("heading", { name: "Add this value as a sensor" })).toBeVisible();
+  await shadow.getByLabel("New sensor name").fill("Current Temperature");
+  await shadow.getByLabel("New sensor unit (optional)").fill("°C");
+  await shadow.getByRole("button", { name: "Add sensor" }).click();
 
   const createButton = shadow.getByRole("button", { name: "Create in Home Assistant" });
   await expect(createButton).toBeEnabled();
@@ -89,8 +91,8 @@ test("guided scrape text search disambiguates multiple visible matches", async (
   const createMessage = messages.find((message) => message.type === "web_data_assistant/create_source");
   expect(createMessage.entities).toEqual([
     {
-      key: "carlow_current_temperature",
-      name: "Carlow Current Temperature",
+      key: "current_temperature",
+      name: "Current Temperature",
       selector: ".current-temperature",
       index: 0,
       value_type: "text",
@@ -134,8 +136,8 @@ test("no-match scrape search can be retried without reloading a page preview", a
   await shadow.getByLabel("Current text or value").fill("14°C");
   await shadow.getByRole("button", { name: "Find matches" }).click();
   await expect(shadow.getByText("Found 1 specific match.")).toBeVisible();
-  await expect(shadow.getByRole("heading", { name: "Selected value" })).toBeVisible();
-  await expect(shadow.getByRole("button", { name: "Create in Home Assistant" })).toBeEnabled();
+  await expect(shadow.getByRole("heading", { name: "Add this value as a sensor" })).toBeVisible();
+  await expect(shadow.getByRole("button", { name: "Create in Home Assistant" })).toBeDisabled();
 });
 
 test("empty scrape text search is rejected before a request", async ({ page }) => {
@@ -151,4 +153,125 @@ test("empty scrape text search is rejected before a request", async ({ page }) =
     window.__webDataMessages.filter((message) => message.type === "web_data_assistant/search_html")
   );
   expect(searchCalls).toEqual([]);
+});
+
+
+test("multiple scraped values become separate sensors from one source", async ({ page }) => {
+  await page.setContent("<web-data-assistant-panel></web-data-assistant-panel>");
+  await page.addScriptTag({ path: PANEL_SCRIPT });
+  await page.evaluate(() => {
+    window.__webDataMessages = [];
+    const panel = document.querySelector("web-data-assistant-panel");
+    panel.hass = {
+      callWS: async (message) => {
+        window.__webDataMessages.push(structuredClone(message));
+        if (message.type === "web_data_assistant/list_sources") return { sources: [] };
+        if (message.type === "web_data_assistant/search_html") {
+          if (message.search_text === "14°C") {
+            return { matches: [{ selector: ".temperature", index: 0, text: "14°C", context: "Carlow 14°C", tag: "span" }] };
+          }
+          if (message.search_text === "82%") {
+            return { matches: [{ selector: ".humidity", index: 0, text: "82%", context: "Carlow humidity 82%", tag: "span" }] };
+          }
+          return { matches: [] };
+        }
+        if (message.type === "web_data_assistant/create_source") return { entry_id: "multi-scrape" };
+        throw new Error(`Unexpected WebSocket call: ${message.type}`);
+      },
+    };
+  });
+
+  const shadow = page.locator("web-data-assistant-panel").locator(":scope");
+  await shadow.getByRole("button", { name: /Web page/ }).click();
+  await shadow.getByLabel("Source name").fill("Carlow Weather");
+  await shadow.getByLabel("URL").fill("https://example.test/weather");
+
+  await shadow.getByLabel("Current text or value").fill("14°C");
+  await shadow.getByRole("button", { name: "Find matches" }).click();
+  await shadow.getByLabel("New sensor name").fill("Temperature");
+  await shadow.getByLabel("New sensor unit (optional)").fill("°C");
+  await shadow.getByRole("button", { name: "Add sensor" }).click();
+
+  await expect(shadow.getByRole("heading", { name: "Values from this page", exact: true })).toBeVisible();
+  await expect(shadow.locator(".scrape-added-name").first()).toHaveValue("Temperature");
+
+  await shadow.getByLabel("Current text or value").fill("82%");
+  await shadow.getByRole("button", { name: "Find matches" }).click();
+  await shadow.getByLabel("New sensor name").fill("Humidity");
+  await shadow.getByLabel("New sensor unit (optional)").fill("%");
+  await shadow.getByRole("button", { name: "Add sensor" }).click();
+
+  await expect(shadow.locator(".scrape-added-name").nth(1)).toHaveValue("Humidity");
+  const removeButtons = shadow.getByRole("button", { name: "Remove" });
+  await expect(removeButtons).toHaveCount(2);
+  await removeButtons.nth(1).click();
+  await expect(shadow.locator(".scrape-added-name")).toHaveCount(1);
+
+  await shadow.getByLabel("Current text or value").fill("82%");
+  await shadow.getByRole("button", { name: "Find matches" }).click();
+  await shadow.getByLabel("New sensor name").fill("Humidity");
+  await shadow.getByLabel("New sensor unit (optional)").fill("%");
+  await shadow.getByRole("button", { name: "Add sensor" }).click();
+
+  const addedNames = shadow.locator(".scrape-added-name");
+  const addedUnits = shadow.locator(".scrape-added-unit");
+  await addedNames.nth(1).fill("Relative Humidity");
+  await addedUnits.nth(1).fill("% RH");
+
+  await shadow.getByRole("button", { name: "Create in Home Assistant" }).click();
+
+  const createMessage = await page.evaluate(() =>
+    window.__webDataMessages.find((message) => message.type === "web_data_assistant/create_source")
+  );
+  expect(createMessage.url).toBe("https://example.test/weather");
+  expect(createMessage.entities).toEqual([
+    {
+      key: "temperature",
+      name: "Temperature",
+      selector: ".temperature",
+      index: 0,
+      value_type: "text",
+      unit: "°C",
+    },
+    {
+      key: "relative_humidity",
+      name: "Relative Humidity",
+      selector: ".humidity",
+      index: 0,
+      value_type: "text",
+      unit: "% RH",
+    },
+  ]);
+});
+
+
+test("the same scraped page element cannot be added twice", async ({ page }) => {
+  await mountPanel(page, {
+    "web_data_assistant/search_html": {
+      matches: [
+        {
+          selector: ".temperature",
+          index: 0,
+          text: "14°C",
+          context: "Carlow 14°C",
+          tag: "span",
+        },
+      ],
+    },
+  });
+
+  const shadow = page.locator("web-data-assistant-panel").locator(":scope");
+  await shadow.getByRole("button", { name: /Web page/ }).click();
+  await shadow.getByLabel("Source name").fill("Carlow Weather");
+  await shadow.getByLabel("URL").fill("https://example.test/weather");
+
+  for (const name of ["Temperature", "Temperature Copy"]) {
+    await shadow.getByLabel("Current text or value").fill("14°C");
+    await shadow.getByRole("button", { name: "Find matches" }).click();
+    await shadow.getByLabel("New sensor name").fill(name);
+    await shadow.getByRole("button", { name: "Add sensor" }).click();
+  }
+
+  await expect(shadow.locator(".error")).toContainText("That page value has already been added.");
+  await expect(shadow.locator(".scrape-value")).toHaveCount(1);
 });

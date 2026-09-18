@@ -40,8 +40,10 @@ class WebDataAssistantPanel extends HTMLElement {
     this._htmlSearchText = "";
     this._htmlMatches = [];
     this._selectedExtraction = null;
-    this._scrapeUnit = "";
-    this._scrapeLongTextPolicy = "";
+    this._scrapeSelections = [];
+    this._scrapeDraftName = "";
+    this._scrapeDraftUnit = "";
+    this._scrapeDraftLongTextPolicy = "";
   }
 
   set hass(value) {
@@ -127,6 +129,10 @@ class WebDataAssistantPanel extends HTMLElement {
       .match-context { margin-top:5px; color:var(--secondary-text-color); font-size:12px; }
       .selected { margin-top:14px; padding:14px; border:1px solid var(--divider-color); border-radius:8px; background:var(--secondary-background-color); }
       .selected p { margin:6px 0 0; }
+      .scrape-values { display:flex; flex-direction:column; gap:10px; margin-top:16px; }
+      .scrape-value { padding:12px; border:1px solid var(--divider-color); border-radius:8px; background:var(--secondary-background-color); }
+      .scrape-value-head { display:flex; justify-content:space-between; gap:12px; align-items:start; }
+      .scrape-value-meta { margin-top:5px; color:var(--secondary-text-color); font-size:12px; overflow-wrap:anywhere; }
       .mode-box { padding:14px; border:1px solid var(--divider-color); border-radius:10px; background:var(--secondary-background-color); }
       .state-choice { display:flex; flex-direction:column; gap:8px; margin:12px 0; }
       .root-fields { display:flex; flex-direction:column; gap:8px; margin-top:12px; }
@@ -273,7 +279,8 @@ class WebDataAssistantPanel extends HTMLElement {
   _renderScrape() {
     const matches = this._htmlMatches.map((match,index) => `<div class="match ${this._selectedExtraction === match ? "selected" : ""}" data-match="${index}"><div><strong>${this._html(match.text || "(No text)")}</strong></div>${match.context && match.context !== match.text ? `<div class="match-context">${this._html(match.context)}</div>` : ""}<div class="match-context">&lt;${this._html(match.tag || "element")}&gt;</div></div>`).join("");
     const selected = this._selectedExtraction;
-    return `<section class="card"><div class="heading"><div><h2>2. Find the value</h2><p>Enter text exactly as it appears on the page now. It is used only during setup to identify the element — future values can change normally.</p></div></div><div class="search-row">${this._field("Current text or value",`<input id="html-search" type="search" placeholder="e.g. 14.6 °C" value="${this._attr(this._htmlSearchText)}">`)}<button id="find-text" class="primary" ${this._searching ? "disabled" : ""}>${this._searching ? "Finding…" : "Find matches"}</button></div><p class="hint">Home Assistant fetches the page in the background. If visible text is missing from the HTML response, the site may load it with JavaScript; in that case its JSON/API request is usually a better source.</p>${this._htmlMatches.length ? `<div class="matches">${matches}</div>` : ""}${selected ? `<div class="selected"><h3>Selected value</h3><p>${this._html(selected.text || "(No text)")}</p><div class="grid" style="margin-top:12px;">${this._field("Unit (optional)",`<input id="scrape-unit" type="text" placeholder="e.g. °C, %, km/h" value="${this._attr(this._scrapeUnit)}">`)}${this._field("Long text override",this._longTextSelect("scrape-long-text","",this._scrapeLongTextPolicy))}</div><details><summary>Advanced extraction details</summary><p class="hint">Selector: <code>${this._html(selected.selector)}</code><br>Match index: ${Number(selected.index || 0)}</p></details></div>` : ""}</section>`;
+    const values = this._scrapeSelections.map((item,index) => `<div class="scrape-value"><div class="scrape-value-head"><div><strong>${this._html(item.text || "(Selected page value)")}</strong><div class="scrape-value-meta">Selector: <code>${this._html(item.selector)}</code> · match ${Number(item.index || 0)}</div></div><button class="secondary remove-scrape-value" data-index="${index}">Remove</button></div><div class="grid" style="margin-top:12px;">${this._field("Sensor name",`<input class="scrape-added-name" data-index="${index}" type="text" value="${this._attr(item.name)}">`)}${this._field("Unit (optional)",`<input class="scrape-added-unit" data-index="${index}" type="text" value="${this._attr(item.unit || "")}">`)}${this._field("Long text override",`<select class="scrape-added-long-text" data-index="${index}"><option value="" ${!item.longTextPolicy ? "selected" : ""}>Use source default</option><option value="truncate" ${item.longTextPolicy === "truncate" ? "selected" : ""}>Shorten state + preserve full value (recommended)</option><option value="attribute_only" ${item.longTextPolicy === "attribute_only" ? "selected" : ""}>Store full value as attribute; state becomes Loaded</option><option value="unavailable" ${item.longTextPolicy === "unavailable" ? "selected" : ""}>Mark unavailable if too long</option></select>`)}</div></div>`).join("");
+    return `<section class="card"><div class="heading"><div><h2>2. Choose values from this page</h2><p>Find one value at a time using text currently visible on the page. Every value you add becomes its own Home Assistant sensor, while the page itself is fetched only once per update.</p></div></div>${this._scrapeSelections.length ? `<div class="scrape-values"><h3>Values from this page</h3>${values}</div>` : ""}<div class="search-row" style="margin-top:18px;">${this._field("Current text or value",`<input id="html-search" type="search" placeholder="e.g. 14.6 °C" value="${this._attr(this._htmlSearchText)}">`)}<button id="find-text" class="primary" ${this._searching ? "disabled" : ""}>${this._searching ? "Finding…" : "Find matches"}</button></div><p class="hint">Home Assistant fetches the page in the background. If visible text is missing from the HTML response, the site may load it with JavaScript; in that case its JSON/API request is usually a better source.</p>${this._htmlMatches.length ? `<div class="matches">${matches}</div>` : ""}${selected ? `<div class="selected"><h3>Add this value as a sensor</h3><p>${this._html(selected.text || "(No text)")}</p><div class="grid" style="margin-top:12px;">${this._field("New sensor name",`<input id="scrape-name" type="text" placeholder="e.g. Temperature" value="${this._attr(this._scrapeDraftName)}">`)}${this._field("New sensor unit (optional)",`<input id="scrape-unit" type="text" placeholder="e.g. °C, %, km/h" value="${this._attr(this._scrapeDraftUnit)}">`)}${this._field("New sensor long-text handling",this._longTextSelect("scrape-long-text","",this._scrapeDraftLongTextPolicy))}</div><details><summary>Advanced extraction details</summary><p class="hint">Selector: <code>${this._html(selected.selector)}</code><br>Match index: ${Number(selected.index || 0)}</p></details><div class="actions"><button id="add-scrape-value" class="primary" ${this._scrapeDraftName.trim() ? "" : "disabled"}>Add sensor</button></div></div>` : ""}</section>`;
   }
 
   _renderBehaviour() {
@@ -304,11 +311,17 @@ class WebDataAssistantPanel extends HTMLElement {
     this.shadowRoot.querySelectorAll(".json-state").forEach((radio) => radio.addEventListener("change",(event) => { if (event.target.checked) { this._jsonStatePath = event.target.value; this._render(); } }));
     this.shadowRoot.getElementById("aggregate-unit")?.addEventListener("input",(event) => { this._aggregateUnit = event.target.value; });
     this.shadowRoot.getElementById("aggregate-long-text")?.addEventListener("change",(event) => { this._aggregateLongTextPolicy = event.target.value; });
-    this.shadowRoot.getElementById("scrape-long-text")?.addEventListener("change",(event) => { this._scrapeLongTextPolicy = event.target.value; });
+    this.shadowRoot.getElementById("scrape-long-text")?.addEventListener("change",(event) => { this._scrapeDraftLongTextPolicy = event.target.value; });
+    this.shadowRoot.getElementById("scrape-name")?.addEventListener("input",(event) => { this._scrapeDraftName = event.target.value; this._refreshScrapeAdd(); });
+    this.shadowRoot.getElementById("scrape-unit")?.addEventListener("input",(event) => { this._scrapeDraftUnit = event.target.value; });
+    this.shadowRoot.getElementById("add-scrape-value")?.addEventListener("click",() => this._addScrapeValue());
+    this.shadowRoot.querySelectorAll(".remove-scrape-value").forEach((button) => button.addEventListener("click",() => { this._scrapeSelections.splice(Number(button.dataset.index),1); this._render(); }));
+    this.shadowRoot.querySelectorAll(".scrape-added-name").forEach((input) => input.addEventListener("input",(event) => { this._scrapeSelections[Number(event.target.dataset.index)].name=event.target.value; this._refreshSave(); }));
+    this.shadowRoot.querySelectorAll(".scrape-added-unit").forEach((input) => input.addEventListener("input",(event) => { this._scrapeSelections[Number(event.target.dataset.index)].unit=event.target.value; }));
+    this.shadowRoot.querySelectorAll(".scrape-added-long-text").forEach((select) => select.addEventListener("change",(event) => { this._scrapeSelections[Number(event.target.dataset.index)].longTextPolicy=event.target.value; }));
     this.shadowRoot.getElementById("json-filter")?.addEventListener("input",(event) => { this._jsonFilter = event.target.value; this._render(); });
     this.shadowRoot.querySelectorAll("[data-match]").forEach((element) => element.addEventListener("click",() => { this._selectedExtraction = this._htmlMatches[Number(element.dataset.match)]; this._render(); }));
     this.shadowRoot.getElementById("html-search")?.addEventListener("input",(event) => { this._htmlSearchText = event.target.value; });
-    this.shadowRoot.getElementById("scrape-unit")?.addEventListener("input",(event) => { this._scrapeUnit = event.target.value; });
     this.shadowRoot.querySelectorAll(".refresh-source").forEach((button) => button.addEventListener("click",() => this._refreshSource(button.dataset.entryId)));
     this.shadowRoot.getElementById("load")?.addEventListener("click",() => this._load());
     this.shadowRoot.getElementById("find-text")?.addEventListener("click",() => this._findText());
@@ -363,6 +376,42 @@ class WebDataAssistantPanel extends HTMLElement {
     finally { this._searching = false; this._render(); }
   }
 
+  _refreshScrapeAdd() {
+    const button=this.shadowRoot.getElementById("add-scrape-value");
+    if(button) button.disabled=!this._selectedExtraction||!this._scrapeDraftName.trim();
+  }
+
+  _addScrapeValue() {
+    const selected=this._selectedExtraction;
+    const name=this._scrapeDraftName.trim();
+    if(!selected||!name) return;
+    const duplicate=this._scrapeSelections.some((item)=>item.selector===selected.selector&&Number(item.index||0)===Number(selected.index||0));
+    if(duplicate) {
+      this._error="That page value has already been added.";
+      this._status="";
+      this._render();
+      return;
+    }
+    this._scrapeSelections.push({
+      selector:selected.selector,
+      index:Number(selected.index||0),
+      text:selected.text||"",
+      context:selected.context||"",
+      name,
+      unit:this._scrapeDraftUnit.trim(),
+      longTextPolicy:this._scrapeDraftLongTextPolicy,
+    });
+    this._selectedExtraction=null;
+    this._htmlMatches=[];
+    this._htmlSearchText="";
+    this._scrapeDraftName="";
+    this._scrapeDraftUnit="";
+    this._scrapeDraftLongTextPolicy="";
+    this._error="";
+    this._status=`Added ${name}. Find another value or create the source.`;
+    this._render();
+  }
+
   _jsonMetadata(path,item=null) {
     if (!this._jsonOverrides.has(path)) {
       const candidate = item || (this._jsonResult?.values || []).find((entry) => entry.path === path);
@@ -375,11 +424,17 @@ class WebDataAssistantPanel extends HTMLElement {
   _entities() {
     const sourceName = this._form.name.trim() || "Web data";
     if (this._sourceType === "scrape") {
-      if (!this._selectedExtraction) return [];
-      const entity = { key:this._slug(sourceName)||"web_value", name:sourceName, selector:this._selectedExtraction.selector, index:Number(this._selectedExtraction.index||0), value_type:"text" };
-      if (this._scrapeUnit.trim()) entity.unit = this._scrapeUnit.trim();
-      if (this._scrapeLongTextPolicy) entity.long_text_policy = this._scrapeLongTextPolicy;
-      return [entity];
+      const used = new Set();
+      return this._scrapeSelections.map((item,index) => {
+        let key=this._slug(item.name)||`web_value_${index + 1}`;
+        const base=key; let suffix=2;
+        while(used.has(key)) key=`${base}_${suffix++}`;
+        used.add(key);
+        const entity={ key, name:item.name.trim(), selector:item.selector, index:Number(item.index||0), value_type:"text" };
+        if(item.unit?.trim()) entity.unit=item.unit.trim();
+        if(item.longTextPolicy) entity.long_text_policy=item.longTextPolicy;
+        return entity;
+      });
     }
 
     const byPath = new Map((this._jsonResult?.values || []).map((item) => [item.path,item]));
@@ -419,13 +474,13 @@ class WebDataAssistantPanel extends HTMLElement {
 
   _resetResults() {
     this._jsonResult=null; this._selectedJson.clear(); this._jsonOverrides.clear(); this._jsonFilter=""; this._jsonStatePath=""; this._aggregateUnit=""; this._aggregateLongTextPolicy="";
-    this._htmlMatches=[]; this._htmlSearchText=""; this._scrapeUnit=""; this._scrapeLongTextPolicy=""; this._selectedExtraction=null;
+    this._htmlMatches=[]; this._htmlSearchText=""; this._selectedExtraction=null; this._scrapeSelections=[]; this._scrapeDraftName=""; this._scrapeDraftUnit=""; this._scrapeDraftLongTextPolicy="";
     this._error=""; this._status="";
   }
 
   _canSave() {
     if(!this._form.name.trim()||!this._form.url.trim()) return false;
-    if(this._sourceType === "scrape") return Boolean(this._selectedExtraction);
+    if(this._sourceType === "scrape") return this._scrapeSelections.length > 0 && this._scrapeSelections.every((item)=>item.name.trim());
     if(!this._jsonResult) return false;
     if(this._jsonMode === "object") return true;
     if(!this._selectedJson.size) return false;
