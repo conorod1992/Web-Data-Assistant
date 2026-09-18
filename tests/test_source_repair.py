@@ -418,3 +418,72 @@ async def test_invalid_repair_does_not_change_stored_extraction(
     stored = hass.config_entries.async_get_entry(entry.entry_id)
     assert stored is not None
     assert stored.data[CONF_ENTITIES][0][CONF_PATH] == "/old/humidity"
+
+
+async def test_repair_restores_previous_extraction_when_reload_fails(
+    hass: HomeAssistant,
+    hass_ws_client,
+) -> None:
+    """Restore the old extraction if Home Assistant cannot reload the repaired entry."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Weather",
+        data={
+            CONF_SOURCE_NAME: "Weather",
+            CONF_SOURCE_TYPE: SOURCE_JSON,
+            CONF_URL: "https://example.test/weather.json",
+            CONF_FAILURE_MODE: FAILURE_UNAVAILABLE,
+            CONF_ENTITIES: [
+                {
+                    "key": "humidity",
+                    "name": "Humidity",
+                    CONF_PATH: "/old/humidity",
+                    CONF_VALUE_TYPE: VALUE_NUMBER,
+                }
+            ],
+        },
+    )
+    entry.add_to_hass(hass)
+    fetch = AsyncMock(return_value=_response({"current": {"humidity": 82}}))
+
+    with patch(
+        "custom_components.web_data_assistant.client.WebDataClient.async_fetch",
+        new=fetch,
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        real_reload = hass.config_entries.async_reload
+        reload_calls = 0
+
+        async def reload_with_first_failure(entry_id: str) -> bool:
+            nonlocal reload_calls
+            reload_calls += 1
+            if reload_calls == 1:
+                return False
+            return await real_reload(entry_id)
+
+        client = await hass_ws_client(hass)
+        with patch.object(
+            hass.config_entries,
+            "async_reload",
+            side_effect=reload_with_first_failure,
+        ):
+            await client.send_json(
+                {
+                    "id": 1,
+                    "type": f"{DOMAIN}/repair_entity",
+                    "entry_id": entry.entry_id,
+                    "entity_key": "humidity",
+                    CONF_PATH: "/current/humidity",
+                }
+            )
+            message = await client.receive_json()
+            await hass.async_block_till_done()
+
+    assert message["success"] is False
+    assert message["error"]["code"] == "reload_failed"
+    restored = hass.config_entries.async_get_entry(entry.entry_id)
+    assert restored is not None
+    assert restored.data[CONF_ENTITIES][0][CONF_PATH] == "/old/humidity"
+    assert reload_calls == 2
