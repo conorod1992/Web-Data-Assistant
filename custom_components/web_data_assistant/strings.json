@@ -80,6 +80,18 @@
         "data_description": {
           "max_stale_minutes": "Optional. When keeping the last value, mark it unavailable once the last successful update is older than this. Leave empty to keep it indefinitely."
         }
+      },
+      "scrape_value": {
+        "title": "Add this page value",
+        "description": "Selected value: **{value}**. Give this sensor a friendly name. You have already added {count} value(s) from this page.",
+        "data": {
+          "sensor_name": "Sensor name",
+          "unit": "Unit (optional)",
+          "add_another": "Add another value from this page"
+        },
+        "data_description": {
+          "add_another": "Choose this to return to the text search after adding this sensor. All values from the page will share one HTTP request."
+        }
       }
     },
     "error": {
@@ -88,7 +100,8 @@
       "invalid_headers": "Headers must be a valid JSON object.",
       "no_json_values": "The response was valid JSON, but no selectable scalar values were found.",
       "select_value": "Select at least one value.",
-      "text_not_found": "That text could not be found in the fetched page. Check the value exactly as it currently appears."
+      "text_not_found": "That text could not be found in the fetched page. Check the value exactly as it currently appears.",
+      "duplicate_value": "That page element has already been added as a sensor."
     }
   },
   "options": {
