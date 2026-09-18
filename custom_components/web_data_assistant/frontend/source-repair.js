@@ -1,14 +1,14 @@
-const WebDataAssistantPanel = customElements.get("web-data-assistant-panel");
+const WebDataAssistantRepairPanel = customElements.get("web-data-assistant-panel");
 
-if (WebDataAssistantPanel && !WebDataAssistantPanel.prototype.__sourceRepairInstalled) {
-  const originalStyles = WebDataAssistantPanel.prototype._styles;
-  const originalBind = WebDataAssistantPanel.prototype._bind;
-  const originalRenderJson = WebDataAssistantPanel.prototype._renderJson;
-  const originalRenderScrape = WebDataAssistantPanel.prototype._renderScrape;
-  const originalRenderBehaviour = WebDataAssistantPanel.prototype._renderBehaviour;
-  const originalRenderSave = WebDataAssistantPanel.prototype._renderSave;
+if (WebDataAssistantRepairPanel && !WebDataAssistantRepairPanel.prototype.__sourceRepairInstalled) {
+  const originalStyles = WebDataAssistantRepairPanel.prototype._styles;
+  const originalBind = WebDataAssistantRepairPanel.prototype._bind;
+  const originalRenderJson = WebDataAssistantRepairPanel.prototype._renderJson;
+  const originalRenderScrape = WebDataAssistantRepairPanel.prototype._renderScrape;
+  const originalRenderBehaviour = WebDataAssistantRepairPanel.prototype._renderBehaviour;
+  const originalRenderSave = WebDataAssistantRepairPanel.prototype._renderSave;
 
-  WebDataAssistantPanel.prototype._styles = function () {
+  WebDataAssistantRepairPanel.prototype._styles = function () {
     return `${originalStyles.call(this)}
       .repair-options { display:flex; flex-direction:column; gap:8px; margin-top:12px; }
       .repair-option { display:grid; grid-template-columns:28px minmax(0,1fr) minmax(100px,.5fr); gap:10px; align-items:center; padding:11px 12px; border:1px solid var(--divider-color); border-radius:8px; cursor:pointer; }
@@ -19,7 +19,7 @@ if (WebDataAssistantPanel && !WebDataAssistantPanel.prototype.__sourceRepairInst
     `;
   };
 
-  WebDataAssistantPanel.prototype._repairRequestForm = function (config) {
+  WebDataAssistantRepairPanel.prototype._repairRequestForm = function (config) {
     return {
       name:String(config.source_name || ""),
       url:String(config.url || ""),
@@ -34,7 +34,7 @@ if (WebDataAssistantPanel && !WebDataAssistantPanel.prototype.__sourceRepairInst
     };
   };
 
-  WebDataAssistantPanel.prototype._renderJson = function () {
+  WebDataAssistantRepairPanel.prototype._renderJson = function () {
     if (!this._repairMode) return originalRenderJson.call(this);
     const values = this._jsonResult?.values || [];
     const query = String(this._repairJsonFilter || "").trim().toLowerCase();
@@ -45,19 +45,19 @@ if (WebDataAssistantPanel && !WebDataAssistantPanel.prototype.__sourceRepairInst
     return `<section class="card"><div class="heading"><div><h2>2. Choose the replacement value</h2><p>Select the JSON value that should now power <strong>${this._html(this._repairMode.name)}</strong>. Its Home Assistant entity identity will not change.</p></div></div><div class="repair-banner">Current stored path: <code>${this._html(this._repairMode.entity.path || "(none)")}</code></div><input id="repair-json-filter" type="search" placeholder="Filter paths or current values…" value="${this._attr(this._repairJsonFilter || "")}"><div class="repair-options">${options || '<div class="hint">No JSON values match this filter.</div>'}</div></section>`;
   };
 
-  WebDataAssistantPanel.prototype._renderScrape = function () {
+  WebDataAssistantRepairPanel.prototype._renderScrape = function () {
     if (!this._repairMode) return originalRenderScrape.call(this);
     const matches = (this._repairHtmlMatches || []).map((match,index) => `<div class="match ${this._repairSelectedMatch === match ? "selected" : ""}" data-repair-match="${index}"><div><strong>${this._html(match.text || "(No text)")}</strong></div>${match.context && match.context !== match.text ? `<div class="match-context">${this._html(match.context)}</div>` : ""}<div class="match-context">&lt;${this._html(match.tag || "element")}&gt;</div></div>`).join("");
     const selected = this._repairSelectedMatch;
     return `<section class="card"><div class="heading"><div><h2>2. Find the replacement value</h2><p>Open the page separately if helpful, then enter text currently shown for <strong>${this._html(this._repairMode.name)}</strong>. Choose the correct contextual match.</p></div></div><div class="repair-banner">The existing selector no longer extracts this sensor reliably. Repair changes only this sensor's selector/index.</div><div class="search-row">${this._field("Current text or value",`<input id="repair-html-search" type="search" placeholder="e.g. 14.6 °C" value="${this._attr(this._repairHtmlSearchText || "")}">`)}<button id="repair-find-text" class="primary" ${this._repairSearching ? "disabled" : ""}>${this._repairSearching ? "Finding…" : "Find matches"}</button></div>${this._repairHtmlStatus ? `<div class="notice ${this._repairHtmlMatches?.length ? "success" : "error"}">${this._html(this._repairHtmlStatus)}</div>` : ""}${matches ? `<div class="matches">${matches}</div>` : ""}${selected ? `<div class="selected"><h3>Replacement selected</h3><p>${this._html(selected.text || "(No text)")}</p><details><summary>Technical details</summary><p class="hint">Selector: <code>${this._html(selected.selector)}</code><br>Match index: ${Number(selected.index || 0)}</p></details></div>` : ""}</section>`;
   };
 
-  WebDataAssistantPanel.prototype._renderBehaviour = function () {
+  WebDataAssistantRepairPanel.prototype._renderBehaviour = function () {
     if (this._repairMode) return "";
     return originalRenderBehaviour.call(this);
   };
 
-  WebDataAssistantPanel.prototype._renderSave = function () {
+  WebDataAssistantRepairPanel.prototype._renderSave = function () {
     if (!this._repairMode) return originalRenderSave.call(this);
     const ready = this._repairMode.sourceType === "json"
       ? this._repairJsonPath !== null
@@ -65,7 +65,7 @@ if (WebDataAssistantPanel && !WebDataAssistantPanel.prototype.__sourceRepairInst
     return `<section class="card save-card"><div class="heading" style="margin:0;align-items:center;"><div><h2 style="margin-bottom:4px;">Repair ${this._html(this._repairMode.name)}</h2><p style="margin:0;">Only this extraction is changed. The entity key and Home Assistant identity stay the same.</p></div><div class="actions" style="margin-top:0;"><button id="cancel-repair" class="secondary" ${this._repairSaving ? "disabled" : ""}>Cancel</button><button id="apply-repair" class="primary" ${!ready || this._repairSaving ? "disabled" : ""}>${this._repairSaving ? "Repairing…" : "Apply repair"}</button></div></div></section>`;
   };
 
-  WebDataAssistantPanel.prototype._bind = function () {
+  WebDataAssistantRepairPanel.prototype._bind = function () {
     originalBind.call(this);
 
     this.shadowRoot.querySelectorAll(".repair-entity").forEach((button) => {
@@ -107,7 +107,7 @@ if (WebDataAssistantPanel && !WebDataAssistantPanel.prototype.__sourceRepairInst
     }
   };
 
-  WebDataAssistantPanel.prototype._openRepair = async function (entryId, entityKey) {
+  WebDataAssistantRepairPanel.prototype._openRepair = async function (entryId, entityKey) {
     if (!this._hass || !entryId || !entityKey || this._repairLoading || this._repairSaving) return;
     this._repairLoading = `${entryId}:${entityKey}`;
     this._sourcesError = "";
@@ -157,7 +157,7 @@ if (WebDataAssistantPanel && !WebDataAssistantPanel.prototype.__sourceRepairInst
     }
   };
 
-  WebDataAssistantPanel.prototype._findRepairText = async function () {
+  WebDataAssistantRepairPanel.prototype._findRepairText = async function () {
     if (!this._hass || !this._repairMode || this._repairMode.sourceType !== "scrape") return;
     const searchText = String(this._repairHtmlSearchText || "").trim();
     if (!searchText) {
@@ -201,7 +201,7 @@ if (WebDataAssistantPanel && !WebDataAssistantPanel.prototype.__sourceRepairInst
     }
   };
 
-  WebDataAssistantPanel.prototype._applyRepair = async function () {
+  WebDataAssistantRepairPanel.prototype._applyRepair = async function () {
     if (!this._hass || !this._repairMode || this._repairSaving) return;
     const message = {
       type:"web_data_assistant/repair_entity",
@@ -242,7 +242,7 @@ if (WebDataAssistantPanel && !WebDataAssistantPanel.prototype.__sourceRepairInst
     }
   };
 
-  WebDataAssistantPanel.prototype._cancelRepair = function () {
+  WebDataAssistantRepairPanel.prototype._cancelRepair = function () {
     this._repairMode = null;
     this._repairJsonPath = "";
     this._repairJsonFilter = "";
@@ -255,5 +255,5 @@ if (WebDataAssistantPanel && !WebDataAssistantPanel.prototype.__sourceRepairInst
     this._render();
   };
 
-  WebDataAssistantPanel.prototype.__sourceRepairInstalled = true;
+  WebDataAssistantRepairPanel.prototype.__sourceRepairInstalled = true;
 }
