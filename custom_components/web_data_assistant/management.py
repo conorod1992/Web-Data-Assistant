@@ -88,7 +88,7 @@ def _entry_snapshot(entry: ConfigEntry) -> dict[str, Any]:
         source_available = coordinator.last_update_success
         if coordinator.last_successful_update is not None:
             last_successful_update = coordinator.last_successful_update.isoformat()
-        if coordinator.data is not None:
+        if source_available and coordinator.data is not None:
             extraction_error_count = len(coordinator.data.extraction_errors)
             entities_by_key = {
                 str(entity.get("key")): entity
