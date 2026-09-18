@@ -347,6 +347,13 @@ async def test_repair_entity_requires_admin_before_fetch(
     )
     entry.add_to_hass(hass)
 
+    with patch(
+        "custom_components.web_data_assistant.client.WebDataClient.async_fetch",
+        new=AsyncMock(return_value=_response({"old": {"humidity": 81}})),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
     client = await hass_ws_client(hass, hass_read_only_access_token)
     fetch = AsyncMock(return_value=_response({"current": {"humidity": 82}}))
     with patch(
