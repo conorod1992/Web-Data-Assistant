@@ -12,7 +12,7 @@ Web Data Assistant starts with the data you want rather than the technical expre
 
 1. Enter an endpoint URL and optional request settings.
 2. Web Data Assistant fetches the real response through Home Assistant.
-3. Browse and search the scalar values found in the JSON document.
+3. Browse the response as an expandable JSON tree, or search across scalar paths/values.
 4. Choose how the data should appear in Home Assistant.
 5. Review friendly names, attributes, units and long-text handling before saving.
 6. Everything selected from one source shares one HTTP request on each refresh.
@@ -23,7 +23,9 @@ The guided panel supports three JSON output modes:
 - **One sensor + attributes** — choose one selected value as the entity state, with the other selected values exposed as normal Home Assistant attributes. The state can also be left as the stable value `Loaded` when the entity is primarily an attribute container.
 - **Import object as attributes** — the top-level keys of a JSON object become attributes on one entity. Nested objects and arrays remain structured dictionaries/lists rather than being flattened into artificial key names.
 
-JSON locations are stored internally as RFC 6901 JSON Pointers, so unusual object keys do not require the user to build or escape a template expression. Attribute names are editable in the guided aggregate mode.
+JSON locations are stored internally as RFC 6901 JSON Pointers, so unusual object keys do not require the user to build or escape a template expression. The tree is only a browsing layer over those stable pointers: nested objects and array indexes are expandable by default, while typing in Search switches to a flat filtered result list without losing selections. Attribute names are editable in the guided aggregate mode.
+
+For numeric state sensors, the panel can also suggest native Home Assistant sensor metadata when the meaning is reasonably clear from the path/name/unit. Examples include Temperature + Measurement, Humidity + Measurement, and cumulative kWh Energy + Total increasing. Suggestions are visible and user-overridable; **None** disables either device class or statistics behavior. Existing stored metadata is preserved during Edit rather than silently recalculated.
 
 Guided scalar discovery is intentionally capped at 250 values to keep very large responses responsive. The preview API reports when additional values were omitted rather than treating the capped result as complete.
 
@@ -167,6 +169,7 @@ custom_components/web_data_assistant/
 │   ├── source-lifecycle.js
 │   ├── source-repair.js
 │   ├── source-setup-ux.js
+│   ├── source-json-ux.js
 │   ├── web-data-assistant-panel-entry.js
 │   └── web-data-assistant-panel.js
 ├── management.py
@@ -187,6 +190,7 @@ tests/
 ├── test_frontend_runtime.py
 ├── test_integration.py
 ├── test_json_attributes_runtime.py
+├── test_native_metadata_runtime.py
 ├── test_runtime_semantics.py
 ├── test_scrape_flow_runtime.py
 ├── test_source_lifecycle.py
@@ -255,6 +259,8 @@ A separate Playwright/Chromium suite renders the actual custom panel JavaScript 
 - JSON separate-sensor creation, names, units, scalar types and escaped pointers
 - one JSON sensor with a selected state plus attributes
 - root-object import with structured attributes
+- hierarchical JSON browsing with expandable object/array branches and flat search fallback
+- native Home Assistant device/state-class suggestions with explicit overrides
 - text-first scrape matching and ambiguous-match disambiguation
 - multiple scraped values from one page, including add/remove/re-add setup
 - confirmation that the primary scrape panel does not use an iframe
