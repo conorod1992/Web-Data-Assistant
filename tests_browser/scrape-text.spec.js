@@ -75,7 +75,7 @@ test("guided scrape text search disambiguates multiple visible matches", async (
   await shadow.locator(".match").filter({ hasText: "Carlow current weather" }).click();
   await expect(shadow.getByRole("heading", { name: "Add this value as a sensor" })).toBeVisible();
   await shadow.getByLabel("New sensor name").fill("Current Temperature");
-  await shadow.getByLabel("Unit (optional)").fill("°C");
+  await shadow.getByLabel("New sensor unit (optional)").fill("°C");
   await shadow.getByRole("button", { name: "Add sensor" }).click();
 
   const createButton = shadow.getByRole("button", { name: "Create in Home Assistant" });
@@ -189,7 +189,7 @@ test("multiple scraped values become separate sensors from one source", async ({
   await shadow.getByLabel("Current text or value").fill("14°C");
   await shadow.getByRole("button", { name: "Find matches" }).click();
   await shadow.getByLabel("New sensor name").fill("Temperature");
-  await shadow.getByLabel("Unit (optional)").fill("°C");
+  await shadow.getByLabel("New sensor unit (optional)").fill("°C");
   await shadow.getByRole("button", { name: "Add sensor" }).click();
 
   await expect(shadow.getByText("Values from this page")).toBeVisible();
@@ -198,7 +198,7 @@ test("multiple scraped values become separate sensors from one source", async ({
   await shadow.getByLabel("Current text or value").fill("82%");
   await shadow.getByRole("button", { name: "Find matches" }).click();
   await shadow.getByLabel("New sensor name").fill("Humidity");
-  await shadow.getByLabel("Unit (optional)").fill("%");
+  await shadow.getByLabel("New sensor unit (optional)").fill("%");
   await shadow.getByRole("button", { name: "Add sensor" }).click();
 
   await expect(shadow.getByText("Humidity", { exact: true })).toBeVisible();
@@ -210,7 +210,7 @@ test("multiple scraped values become separate sensors from one source", async ({
   await shadow.getByLabel("Current text or value").fill("82%");
   await shadow.getByRole("button", { name: "Find matches" }).click();
   await shadow.getByLabel("New sensor name").fill("Humidity");
-  await shadow.getByLabel("Unit (optional)").fill("%");
+  await shadow.getByLabel("New sensor unit (optional)").fill("%");
   await shadow.getByRole("button", { name: "Add sensor" }).click();
 
   const addedNames = shadow.locator(".scrape-added-name");
