@@ -61,7 +61,7 @@ test("hierarchical JSON browser preserves nested selection and search behavior",
   await expect(tree.locator("summary").filter({ hasText: "forecast" })).toBeVisible();
 
   const forecast = tree.locator("details").filter({ hasText: "forecast" }).first();
-  await forecast.locator("summary").click();
+  await expect(forecast).toHaveAttribute("open", "");
   const indexZero = forecast.locator("details").filter({ hasText: "[0]" }).first();
   await indexZero.locator("summary").click();
 
