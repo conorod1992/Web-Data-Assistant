@@ -107,10 +107,12 @@ Sensors expose concise source-health information such as whether the latest sour
 
 Web Data Assistant has two setup surfaces:
 
-- A dedicated **Web Data Assistant** admin panel provides the intended guided experience, including the richer JSON output modes, per-sensor long-text choices and full source lifecycle management.
+- A dedicated **Web Data Assistant** admin panel provides the intended guided experience, including the richer JSON output modes, per-sensor long-text choices, a live Home Assistant entity preview and full source lifecycle management.
 - A conventional Home Assistant config flow remains available as a simpler fallback/compatibility setup path.
 
 Starting **Add Integration → Web Data Assistant** registers the guided panel immediately, so the visual workflow can be used before the first data source has been created.
+
+Before saving, **What Home Assistant will create** is built from the same entity definitions that the panel will submit. It previews each sensor's friendly name, current/sample state where available, unit, JSON attributes and their sample values, effective long-text handling, and the stable internal entity key. This same preview is available while editing or duplicating a source; Repair remains focused on the single broken extraction.
 
 Sensors created from the same source are grouped under one Home Assistant service device.
 
@@ -119,7 +121,8 @@ Sensors created from the same source are grouped under one Home Assistant servic
 The current v1 foundation supports:
 
 - GET and POST requests
-- optional request headers
+- optional request headers through friendly **Header name / Header value** rows
+- optional raw headers JSON import under Advanced for power users and existing configurations
 - optional raw POST body
 - configurable SSL certificate verification
 - configurable polling interval
@@ -163,6 +166,7 @@ custom_components/web_data_assistant/
 ├── frontend/
 │   ├── source-lifecycle.js
 │   ├── source-repair.js
+│   ├── source-setup-ux.js
 │   ├── web-data-assistant-panel-entry.js
 │   └── web-data-assistant-panel.js
 ├── management.py
@@ -261,6 +265,8 @@ A separate Playwright/Chromium suite renders the actual custom panel JavaScript 
 - preservation of the populated Edit form after an update failure
 - guided JSON-path and scrape-selector repair flows
 - complex JSON repair fallback to full Edit
+- friendly request-header rows, add/remove behavior, duplicate-name validation and raw JSON import
+- live Home Assistant entity previews for separate JSON sensors, aggregate JSON sensors, scrape sensors, Edit and Duplicate
 - large/truncated JSON discovery and filtering
 - narrow/mobile-width layout without horizontal overflow
 - request settings, validation, error recovery and save-state preservation
