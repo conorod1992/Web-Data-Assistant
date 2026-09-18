@@ -91,6 +91,7 @@ jobs:
           tests/test_source_lifecycle.py
           tests/test_source_lifecycle_auth.py
           tests/test_source_lifecycle_rollback.py
+          tests/test_source_repair.py
           tests/test_config_flow_runtime.py
           tests/test_scrape_flow_runtime.py
           tests/test_runtime_semantics.py
