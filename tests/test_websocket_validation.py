@@ -370,6 +370,6 @@ async def test_create_source_accepts_multiple_scrape_entities(
     )
     assert temperature_id is not None
     assert humidity_id is not None
-    assert hass.states[temperature_id].state == "14°C"
-    assert hass.states[humidity_id].state == "82%"
+    assert hass.states.get(temperature_id).state == "14°C"
+    assert hass.states.get(humidity_id).state == "82%"
     assert fetch.await_count >= 2
