@@ -9,6 +9,7 @@ from homeassistant.helpers import entity_registry as er
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.web_data_assistant.const import (
+    CONF_ATTRIBUTES,
     CONF_ENTITIES,
     CONF_FAILURE_MODE,
     CONF_INDEX,
@@ -264,3 +265,57 @@ async def test_repair_scrape_entity_replaces_selector_and_preserves_identity(
     state = hass.states.get(entity_id)
     assert state is not None
     assert state.state == "Online"
+
+
+async def test_complex_json_entity_is_reported_but_not_directly_repairable(
+    hass: HomeAssistant,
+    hass_ws_client,
+) -> None:
+    """Require full Edit when one JSON sensor contains multiple extraction paths."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Weather",
+        data={
+            CONF_SOURCE_NAME: "Weather",
+            CONF_SOURCE_TYPE: SOURCE_JSON,
+            CONF_URL: "https://example.test/weather.json",
+            CONF_FAILURE_MODE: FAILURE_UNAVAILABLE,
+            CONF_ENTITIES: [
+                {
+                    "key": "weather",
+                    "name": "Weather",
+                    CONF_PATH: "/current/temperature",
+                    CONF_ATTRIBUTES: {"humidity": "/current/humidity"},
+                    CONF_VALUE_TYPE: VALUE_NUMBER,
+                }
+            ],
+        },
+    )
+    entry.add_to_hass(hass)
+
+    with patch(
+        "custom_components.web_data_assistant.client.WebDataClient.async_fetch",
+        new=AsyncMock(return_value=_response({"current": {"temperature": 14.6}})),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+    client = await hass_ws_client(hass)
+    await client.send_json({"id": 1, "type": f"{DOMAIN}/list_sources"})
+    listed = await client.receive_json()
+    issue = listed["result"]["sources"][0]["extraction_issues"][0]
+    assert issue["name"] == "Weather"
+    assert issue["repairable"] is False
+
+    await client.send_json(
+        {
+            "id": 2,
+            "type": f"{DOMAIN}/repair_entity",
+            "entry_id": entry.entry_id,
+            "entity_key": "weather",
+            CONF_PATH: "/current/temperature",
+        }
+    )
+    repair = await client.receive_json()
+    assert repair["success"] is False
+    assert repair["error"]["code"] == "not_repairable"
