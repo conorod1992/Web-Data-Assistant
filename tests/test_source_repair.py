@@ -8,6 +8,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
+from custom_components.web_data_assistant.client import WebDataConnectionError
 from custom_components.web_data_assistant.const import (
     CONF_ATTRIBUTES,
     CONF_ENTITIES,
@@ -494,3 +495,51 @@ async def test_repair_restores_previous_extraction_when_reload_fails(
     assert restored is not None
     assert restored.data[CONF_ENTITIES][0][CONF_PATH] == "/old/humidity"
     assert reload_calls == 2
+
+
+async def test_source_outage_suppresses_stale_repair_issue(
+    hass: HomeAssistant,
+    hass_ws_client,
+) -> None:
+    """Do not offer Repair when the current problem is that the source is unreachable."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Weather",
+        data={
+            CONF_SOURCE_NAME: "Weather",
+            CONF_SOURCE_TYPE: SOURCE_JSON,
+            CONF_URL: "https://example.test/weather.json",
+            CONF_FAILURE_MODE: FAILURE_UNAVAILABLE,
+            CONF_ENTITIES: [
+                {
+                    "key": "humidity",
+                    "name": "Humidity",
+                    CONF_PATH: "/current/humidity",
+                    CONF_VALUE_TYPE: VALUE_NUMBER,
+                }
+            ],
+        },
+    )
+    entry.add_to_hass(hass)
+    fetch = AsyncMock(return_value=_response({"current": {}}))
+
+    with patch(
+        "custom_components.web_data_assistant.client.WebDataClient.async_fetch",
+        new=fetch,
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        fetch.side_effect = WebDataConnectionError("Source returned HTTP 503")
+        await entry.runtime_data.async_refresh()
+        await hass.async_block_till_done()
+
+    client = await hass_ws_client(hass)
+    await client.send_json({"id": 1, "type": f"{DOMAIN}/list_sources"})
+    message = await client.receive_json()
+
+    assert message["success"] is True
+    source = message["result"]["sources"][0]
+    assert source["source_available"] is False
+    assert source["extraction_error_count"] == 0
+    assert source["extraction_issues"] == []
