@@ -193,7 +193,7 @@ test("multiple scraped values become separate sensors from one source", async ({
   await shadow.getByRole("button", { name: "Add sensor" }).click();
 
   await expect(shadow.getByRole("heading", { name: "Values from this page", exact: true })).toBeVisible();
-  await expect(shadow.getByText("Temperature", { exact: true })).toBeVisible();
+  await expect(shadow.locator(".scrape-added-name").first()).toHaveValue("Temperature");
 
   await shadow.getByLabel("Current text or value").fill("82%");
   await shadow.getByRole("button", { name: "Find matches" }).click();
@@ -201,11 +201,11 @@ test("multiple scraped values become separate sensors from one source", async ({
   await shadow.getByLabel("New sensor unit (optional)").fill("%");
   await shadow.getByRole("button", { name: "Add sensor" }).click();
 
-  await expect(shadow.getByText("Humidity", { exact: true })).toBeVisible();
+  await expect(shadow.locator(".scrape-added-name").nth(1)).toHaveValue("Humidity");
   const removeButtons = shadow.getByRole("button", { name: "Remove" });
   await expect(removeButtons).toHaveCount(2);
   await removeButtons.nth(1).click();
-  await expect(shadow.getByText("Humidity", { exact: true })).toHaveCount(0);
+  await expect(shadow.locator(".scrape-added-name")).toHaveCount(1);
 
   await shadow.getByLabel("Current text or value").fill("82%");
   await shadow.getByRole("button", { name: "Find matches" }).click();
