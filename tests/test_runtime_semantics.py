@@ -294,3 +294,79 @@ async def test_multi_scrape_extraction_failure_is_isolated(
     assert entry.runtime_data.last_update_success is True
     assert entry.runtime_data.extraction_error_for("temperature") is None
     assert entry.runtime_data.extraction_error_for("humidity") is not None
+
+
+
+async def test_conditional_get_304_reuses_previous_extraction(
+    hass: HomeAssistant,
+) -> None:
+    """Treat HTTP 304 as successful contact without re-extracting source data."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Weather API",
+        data={
+            CONF_SOURCE_NAME: "Weather API",
+            CONF_SOURCE_TYPE: SOURCE_JSON,
+            CONF_URL: "https://example.test/weather.json",
+            CONF_FAILURE_MODE: FAILURE_UNAVAILABLE,
+            CONF_ENTITIES: [
+                {
+                    "key": "temperature",
+                    "name": "Temperature",
+                    CONF_PATH: "/temperature",
+                    CONF_VALUE_TYPE: VALUE_NUMBER,
+                }
+            ],
+        },
+    )
+    entry.add_to_hass(hass)
+    etag = '"weather-v1"'
+    last_modified = "Fri, 18 Sep 2026 18:00:00 GMT"
+    first = FetchResponse(
+        status=200,
+        content_type="application/json",
+        text='{"temperature":14.6}',
+        json_data={"temperature": 14.6},
+        etag=etag,
+        last_modified=last_modified,
+    )
+    unchanged = FetchResponse(
+        status=304,
+        content_type="",
+        text="",
+        json_data=None,
+        etag=etag,
+        last_modified=last_modified,
+        not_modified=True,
+    )
+    fetch = AsyncMock(side_effect=[first, unchanged])
+
+    with patch(
+        "custom_components.web_data_assistant.client.WebDataClient.async_fetch",
+        new=fetch,
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        entity_id = er.async_get(hass).async_get_entity_id(
+            "sensor", DOMAIN, f"{entry.entry_id}_temperature"
+        )
+        assert entity_id is not None
+        original_data = entry.runtime_data.data
+        original_success = entry.runtime_data.last_successful_update
+        assert hass.states.get(entity_id).state == "14.6"
+
+        await entry.runtime_data.async_refresh()
+        await hass.async_block_till_done()
+
+    assert fetch.await_count == 2
+    second_kwargs = fetch.await_args_list[1].kwargs
+    assert second_kwargs["etag"] == etag
+    assert second_kwargs["last_modified"] == last_modified
+    assert entry.runtime_data.data is original_data
+    assert entry.runtime_data.last_update_success is True
+    assert entry.runtime_data.last_source_error is None
+    assert entry.runtime_data.last_successful_update is not None
+    assert original_success is not None
+    assert entry.runtime_data.last_successful_update >= original_success
+    assert hass.states.get(entity_id).state == "14.6"
