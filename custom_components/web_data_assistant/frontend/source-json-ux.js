@@ -131,6 +131,9 @@ if (WebDataAssistantJsonUxPanel && !WebDataAssistantJsonUxPanel.prototype.__json
   WebDataAssistantJsonUxPanel.prototype._renderObjectJsonReview = function () {
     const nodes = this._jsonObjectNodes();
     if (!nodes.length) return originalRenderObjectJsonReview.call(this);
+    if (this._jsonResult?.root_type !== "dict" && this._jsonObjectPath === undefined) {
+      return originalRenderObjectJsonReview.call(this);
+    }
     if (this._jsonObjectPath === undefined || !this._jsonObjectNodeForPath(this._jsonObjectPath)) {
       this._jsonObjectPath = nodes[0].path;
     }
@@ -412,7 +415,7 @@ if (WebDataAssistantJsonUxPanel && !WebDataAssistantJsonUxPanel.prototype.__json
   };
 
   WebDataAssistantJsonUxPanel.prototype._entities = function () {
-    if (this._sourceType === "json" && this._jsonMode === "object" && this._jsonObjectNodes().length) {
+    if (this._sourceType === "json" && this._jsonMode === "object" && this._jsonObjectPath !== undefined && this._jsonObjectNodes().length) {
       const sourceName = this._form.name.trim() || "Web data";
       const node = this._jsonObjectNodeForPath(this._jsonObjectPath ?? "") || this._jsonObjectNodes()[0];
       const used = new Set();
