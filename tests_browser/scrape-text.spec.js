@@ -74,7 +74,7 @@ test("guided scrape text search disambiguates multiple visible matches", async (
 
   await shadow.locator(".match").filter({ hasText: "Carlow current weather" }).click();
   await expect(shadow.getByRole("heading", { name: "Add this value as a sensor" })).toBeVisible();
-  await shadow.getByLabel("Sensor name").fill("Current Temperature");
+  await shadow.getByLabel("New sensor name").fill("Current Temperature");
   await shadow.getByLabel("Unit (optional)").fill("°C");
   await shadow.getByRole("button", { name: "Add sensor" }).click();
 
@@ -188,7 +188,7 @@ test("multiple scraped values become separate sensors from one source", async ({
 
   await shadow.getByLabel("Current text or value").fill("14°C");
   await shadow.getByRole("button", { name: "Find matches" }).click();
-  await shadow.getByLabel("Sensor name").fill("Temperature");
+  await shadow.getByLabel("New sensor name").fill("Temperature");
   await shadow.getByLabel("Unit (optional)").fill("°C");
   await shadow.getByRole("button", { name: "Add sensor" }).click();
 
@@ -197,7 +197,7 @@ test("multiple scraped values become separate sensors from one source", async ({
 
   await shadow.getByLabel("Current text or value").fill("82%");
   await shadow.getByRole("button", { name: "Find matches" }).click();
-  await shadow.getByLabel("Sensor name").fill("Humidity");
+  await shadow.getByLabel("New sensor name").fill("Humidity");
   await shadow.getByLabel("Unit (optional)").fill("%");
   await shadow.getByRole("button", { name: "Add sensor" }).click();
 
@@ -209,7 +209,7 @@ test("multiple scraped values become separate sensors from one source", async ({
 
   await shadow.getByLabel("Current text or value").fill("82%");
   await shadow.getByRole("button", { name: "Find matches" }).click();
-  await shadow.getByLabel("Sensor name").fill("Humidity");
+  await shadow.getByLabel("New sensor name").fill("Humidity");
   await shadow.getByLabel("Unit (optional)").fill("%");
   await shadow.getByRole("button", { name: "Add sensor" }).click();
 
@@ -268,7 +268,7 @@ test("the same scraped page element cannot be added twice", async ({ page }) => 
   for (const name of ["Temperature", "Temperature Copy"]) {
     await shadow.getByLabel("Current text or value").fill("14°C");
     await shadow.getByRole("button", { name: "Find matches" }).click();
-    await shadow.getByLabel("Sensor name").fill(name);
+    await shadow.getByLabel("New sensor name").fill(name);
     await shadow.getByRole("button", { name: "Add sensor" }).click();
   }
 
