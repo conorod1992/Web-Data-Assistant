@@ -1,14 +1,14 @@
-const WebDataAssistantPanel = customElements.get("web-data-assistant-panel");
+const WebDataAssistantLifecyclePanel = customElements.get("web-data-assistant-panel");
 
-if (WebDataAssistantPanel && !WebDataAssistantPanel.prototype.__sourceLifecycleInstalled) {
-  const originalStyles = WebDataAssistantPanel.prototype._styles;
-  const originalBind = WebDataAssistantPanel.prototype._bind;
-  const originalRenderSave = WebDataAssistantPanel.prototype._renderSave;
-  const originalSave = WebDataAssistantPanel.prototype._save;
-  const originalEntities = WebDataAssistantPanel.prototype._entities;
-  const originalCanSave = WebDataAssistantPanel.prototype._canSave;
+if (WebDataAssistantLifecyclePanel && !WebDataAssistantLifecyclePanel.prototype.__sourceLifecycleInstalled) {
+  const originalStyles = WebDataAssistantLifecyclePanel.prototype._styles;
+  const originalBind = WebDataAssistantLifecyclePanel.prototype._bind;
+  const originalRenderSave = WebDataAssistantLifecyclePanel.prototype._renderSave;
+  const originalSave = WebDataAssistantLifecyclePanel.prototype._save;
+  const originalEntities = WebDataAssistantLifecyclePanel.prototype._entities;
+  const originalCanSave = WebDataAssistantLifecyclePanel.prototype._canSave;
 
-  WebDataAssistantPanel.prototype._styles = function () {
+  WebDataAssistantLifecyclePanel.prototype._styles = function () {
     return `${originalStyles.call(this)}
       .danger { border-color:color-mix(in srgb,var(--error-color,#db4437) 45%,var(--divider-color)); color:var(--error-color,#db4437); }
       .delete-confirm { margin-top:12px; padding:12px; border:1px solid color-mix(in srgb,var(--error-color,#db4437) 35%,var(--divider-color)); border-radius:8px; background:color-mix(in srgb,var(--error-color,#db4437) 7%,transparent); }
@@ -21,7 +21,7 @@ if (WebDataAssistantPanel && !WebDataAssistantPanel.prototype.__sourceLifecycleI
     `;
   };
 
-  WebDataAssistantPanel.prototype._renderSources = function () {
+  WebDataAssistantLifecyclePanel.prototype._renderSources = function () {
     if (!this._sourcesLoaded) return `<section class="card"><h2>Configured sources</h2><p class="hint">Loading configured sources…</p></section>`;
     if (this._sourcesError && !this._sources.length) return `<section class="card"><h2>Configured sources</h2><div class="notice error">${this._html(this._sourcesError)}</div></section>`;
     if (!this._sources.length) return `<section class="card"><h2>Configured sources</h2><p class="hint">No Web Data Assistant sources have been created yet.</p></section>`;
@@ -46,7 +46,7 @@ if (WebDataAssistantPanel && !WebDataAssistantPanel.prototype.__sourceLifecycleI
     return `<section class="card"><div class="heading"><div><h2>Configured sources</h2><p>Current source health is shown without exposing request credentials or retrieved values.</p></div></div>${sourceError}<div class="source-list">${cards}</div></section>`;
   };
 
-  WebDataAssistantPanel.prototype._renderSave = function () {
+  WebDataAssistantLifecyclePanel.prototype._renderSave = function () {
     if (this._editingEntryId) {
       return `<section class="card save-card"><div class="heading" style="margin:0;align-items:center;"><div><h2 style="margin-bottom:4px;">Edit source</h2><p style="margin:0;">Save changes to the existing source. Sensors with unchanged keys keep their Home Assistant identity.</p></div><div class="actions" style="margin-top:0;"><button id="cancel-edit" class="secondary" ${this._saving ? "disabled" : ""}>Cancel edit</button><button id="save" class="primary" ${!this._canSave() || this._saving ? "disabled" : ""}>${this._saving ? "Saving…" : "Save changes"}</button></div></div></section>`;
     }
@@ -56,7 +56,7 @@ if (WebDataAssistantPanel && !WebDataAssistantPanel.prototype.__sourceLifecycleI
     return originalRenderSave.call(this);
   };
 
-  WebDataAssistantPanel.prototype._bind = function () {
+  WebDataAssistantLifecyclePanel.prototype._bind = function () {
     originalBind.call(this);
     this.shadowRoot.querySelectorAll(".edit-source").forEach((button) => button.addEventListener("click", () => this._editSource(button.dataset.entryId)));
     this.shadowRoot.querySelectorAll(".duplicate-source").forEach((button) => button.addEventListener("click", () => this._duplicateSource(button.dataset.entryId)));
@@ -74,7 +74,7 @@ if (WebDataAssistantPanel && !WebDataAssistantPanel.prototype.__sourceLifecycleI
     this.shadowRoot.querySelectorAll(".confirm-delete").forEach((button) => button.addEventListener("click", () => this._deleteSource(button.dataset.entryId)));
   };
 
-  WebDataAssistantPanel.prototype._populateEditableSource = async function (config, mode = "edit") {
+  WebDataAssistantLifecyclePanel.prototype._populateEditableSource = async function (config, mode = "edit") {
     this._resetResults();
     this._editingEntryId = mode === "edit" ? config.entry_id : null;
     this._duplicateMode = mode === "duplicate";
@@ -187,7 +187,7 @@ if (WebDataAssistantPanel && !WebDataAssistantPanel.prototype.__sourceLifecycleI
     this._status = "This legacy JSON extraction can keep its existing sensor definition while you edit the request and refresh settings.";
   };
 
-  WebDataAssistantPanel.prototype._openLifecycleSource = async function (entryId, mode) {
+  WebDataAssistantLifecyclePanel.prototype._openLifecycleSource = async function (entryId, mode) {
     if (!this._hass || !entryId || this._loadingEditableSource || this._saving) return;
     this._loadingEditableSource = entryId;
     this._sourcesError = "";
@@ -205,15 +205,15 @@ if (WebDataAssistantPanel && !WebDataAssistantPanel.prototype.__sourceLifecycleI
     }
   };
 
-  WebDataAssistantPanel.prototype._editSource = function (entryId) {
+  WebDataAssistantLifecyclePanel.prototype._editSource = function (entryId) {
     return this._openLifecycleSource(entryId, "edit");
   };
 
-  WebDataAssistantPanel.prototype._duplicateSource = function (entryId) {
+  WebDataAssistantLifecyclePanel.prototype._duplicateSource = function (entryId) {
     return this._openLifecycleSource(entryId, "duplicate");
   };
 
-  WebDataAssistantPanel.prototype._cancelLifecycleEditor = function () {
+  WebDataAssistantLifecyclePanel.prototype._cancelLifecycleEditor = function () {
     this._editingEntryId = null;
     this._duplicateMode = false;
     this._editingOriginalEntities = [];
@@ -222,7 +222,7 @@ if (WebDataAssistantPanel && !WebDataAssistantPanel.prototype.__sourceLifecycleI
     this._render();
   };
 
-  WebDataAssistantPanel.prototype._resetLifecycleForm = function () {
+  WebDataAssistantLifecyclePanel.prototype._resetLifecycleForm = function () {
     this._sourceType = "json";
     this._form = {
       name:"",
@@ -239,7 +239,7 @@ if (WebDataAssistantPanel && !WebDataAssistantPanel.prototype.__sourceLifecycleI
     this._resetResults();
   };
 
-  WebDataAssistantPanel.prototype._entities = function () {
+  WebDataAssistantLifecyclePanel.prototype._entities = function () {
     if (this._editingPreserveEntitiesOnly && this._editingOriginalEntities?.length) {
       return structuredClone(this._editingOriginalEntities);
     }
@@ -280,12 +280,12 @@ if (WebDataAssistantPanel && !WebDataAssistantPanel.prototype.__sourceLifecycleI
     return built;
   };
 
-  WebDataAssistantPanel.prototype._canSave = function () {
+  WebDataAssistantLifecyclePanel.prototype._canSave = function () {
     if (this._editingPreserveEntitiesOnly) return Boolean(this._form.name.trim() && this._form.url.trim() && this._editingOriginalEntities?.length);
     return originalCanSave.call(this);
   };
 
-  WebDataAssistantPanel.prototype._lifecycleMessage = function (type, entryId = null) {
+  WebDataAssistantLifecyclePanel.prototype._lifecycleMessage = function (type, entryId = null) {
     const request = this._request();
     const interval = Number(this._form.scanInterval || 5);
     const message = {
@@ -306,7 +306,7 @@ if (WebDataAssistantPanel && !WebDataAssistantPanel.prototype.__sourceLifecycleI
     return message;
   };
 
-  WebDataAssistantPanel.prototype._save = async function () {
+  WebDataAssistantLifecyclePanel.prototype._save = async function () {
     if (!this._editingEntryId && !this._duplicateMode) return originalSave.call(this);
     if (!this._hass || !this._canSave()) return;
 
@@ -344,7 +344,7 @@ if (WebDataAssistantPanel && !WebDataAssistantPanel.prototype.__sourceLifecycleI
     }
   };
 
-  WebDataAssistantPanel.prototype._deleteSource = async function (entryId) {
+  WebDataAssistantLifecyclePanel.prototype._deleteSource = async function (entryId) {
     if (!this._hass || !entryId || this._deletingSource) return;
     const source = this._sources.find((item) => item.entry_id === entryId);
     this._deletingSource = entryId;
@@ -369,5 +369,5 @@ if (WebDataAssistantPanel && !WebDataAssistantPanel.prototype.__sourceLifecycleI
     }
   };
 
-  WebDataAssistantPanel.prototype.__sourceLifecycleInstalled = true;
+  WebDataAssistantLifecyclePanel.prototype.__sourceLifecycleInstalled = true;
 }
