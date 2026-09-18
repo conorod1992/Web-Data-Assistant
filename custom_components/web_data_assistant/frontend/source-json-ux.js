@@ -433,7 +433,8 @@ if (WebDataAssistantJsonUxPanel && !WebDataAssistantJsonUxPanel.prototype.__json
         attributes,
       };
       if (this._jsonObjectStatePath) {
-        const item = (this._jsonResult?.values || []).find((candidate) => candidate.path === this._jsonObjectStatePath);
+        const item = (this._jsonResult?.values || []).find((candidate) => candidate.path === this._jsonObjectStatePath)
+          || (node.fields || []).find((candidate) => candidate.path === this._jsonObjectStatePath);
         entity.path = this._jsonObjectStatePath;
         entity.value_type = this._valueType(item?.value_type);
         if (this._aggregateUnit.trim()) entity.unit = this._aggregateUnit.trim();
