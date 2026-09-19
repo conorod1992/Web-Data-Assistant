@@ -5,11 +5,12 @@ class WdaSelectorOptions extends HTMLElement {
     this.attachShadow({ mode: "open" });
   }
 
-  configure({ match, state, request, hass, disabled = false }) {
+  configure({ match, state, request, hass, attribute = null, disabled = false }) {
     this.match = match;
     this.state = state;
     this.request = request;
     this.hass = hass;
+    this.attribute = attribute || match?.attribute || null;
     this.disabled = disabled;
     this.render();
   }
@@ -87,7 +88,7 @@ class WdaSelectorOptions extends HTMLElement {
     try {
       const message = { type: "web_data_assistant/test_html_selector", ...request, selector, index: Number(indexText) };
       // Preserve a stored attribute extraction when repairing it.
-      if (this.match?.attribute) message.attribute = this.match.attribute;
+      if (this.attribute) message.attribute = this.attribute;
       const result = await this.hass.callWS(message);
       if (!this.isConnected || epoch !== this.state.epoch) return;
       if (signature !== JSON.stringify(this.request())) throw new Error("The request settings changed. Test the selector again.");
@@ -106,11 +107,11 @@ class WdaSelectorOptions extends HTMLElement {
     if (this.disabled || this.state.busy || !this.state.tested) return;
     try {
       const tested = this.state.tested;
-      if (tested.signature !== JSON.stringify(this.request()) || tested.selector !== this.state.selector.trim() || String(tested.index) !== this.state.index.trim()) {
+      if (tested.signature !== JSON.stringify(this.request()) || tested.selector !== this.state.selector.trim() || tested.index !== Number(this.state.index.trim())) {
         throw new Error("The selector or request settings changed. Test again before using it.");
       }
       const { signature, ...result } = tested;
-      this.emitSelection({ ...result, candidates: [], attribute: this.match?.attribute });
+      this.emitSelection({ ...result, candidates: [], attribute: this.attribute });
     } catch (err) {
       this.state.tested = null;
       this.state.error = err.message;
@@ -177,7 +178,7 @@ class WdaSelectorOptions extends HTMLElement {
     this.shadowRoot.querySelectorAll('input[name="candidate"]').forEach((radio) => radio.addEventListener("change", () => {
       const candidate = this.candidates[Number(radio.value)];
       if (!radio.checked || !candidate || this.disabled) return;
-      this.emitSelection({ ...this.match, ...candidate });
+      this.emitSelection({ ...this.match, ...candidate, attribute: this.attribute });
     }));
     this.shadowRoot.getElementById("custom-selector").addEventListener("input", (event) => { this.state.selector = event.target.value; this.invalidate(); });
     this.shadowRoot.getElementById("custom-index").addEventListener("input", (event) => { this.state.index = event.target.value; this.invalidate(); });
@@ -222,7 +223,7 @@ if (SelectorPanel && !SelectorPanel.prototype.__selectorOptionsInstalled) {
     }
     this._selectorOptionsState ||= WdaSelectorOptions.createState(match);
     picker.configure({
-      match: match && this._repairMode?.entity?.attribute ? { ...match, attribute: this._repairMode.entity.attribute } : match,
+      match, attribute: this._repairMode?.entity?.attribute,
       state: this._selectorOptionsState, hass: this._hass,
       request: () => this._request(),
       disabled: Boolean(this._saving || this._repairSaving || this._searching || this._repairSearching),
