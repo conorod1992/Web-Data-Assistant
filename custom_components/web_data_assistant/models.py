@@ -126,3 +126,4 @@ class HtmlMatch:
     text: str
     context: str
     tag: str
+    candidates: list[dict[str, Any]] = field(default_factory=list)
