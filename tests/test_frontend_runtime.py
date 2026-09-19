@@ -80,6 +80,11 @@ async def test_panel_and_management_websocket_are_registered(
     panels = await client.receive_json()
     assert panels["success"] is True
     assert PANEL_URL_PATH in panels["result"]
+    panel_config = panels["result"][PANEL_URL_PATH]["config"]["_panel_custom"]
+    assert panel_config["module_url"] == (
+        f"/{DOMAIN}/frontend/web-data-assistant-panel-entry.js"
+    )
+    assert "js_url" not in panel_config
 
     await client.send_json({"id": 2, "type": f"{DOMAIN}/list_sources"})
     sources_message = await client.receive_json()

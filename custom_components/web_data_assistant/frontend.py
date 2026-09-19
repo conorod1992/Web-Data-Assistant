@@ -44,10 +44,12 @@ async def async_register_frontend(hass: HomeAssistant) -> None:
             frontend_url_path=PANEL_URL_PATH,
             config={
                 "_panel_custom": {
+                    # The entrypoint imports the panel feature modules, so Home
+                    # Assistant must load it as an ES module rather than a classic script.
                     "name": PANEL_ELEMENT,
                     "embed_iframe": False,
                     "trust_external": False,
-                    "js_url": f"{FRONTEND_URL}/web-data-assistant-panel-entry.js",
+                    "module_url": f"{FRONTEND_URL}/web-data-assistant-panel-entry.js",
                 }
             },
             require_admin=True,
