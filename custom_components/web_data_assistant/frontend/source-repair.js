@@ -215,6 +215,8 @@ if (WebDataAssistantRepairPanel && !WebDataAssistantRepairPanel.prototype.__sour
       if (!this._repairSelectedMatch) return;
       message.selector = this._repairSelectedMatch.selector;
       message.index = Number(this._repairSelectedMatch.index || 0);
+      const count = this._repairSelectedMatch.match_count;
+      if (Number.isInteger(count) && count > 0) message.expected_match_count = count;
     }
 
     const name = this._repairMode.name;
