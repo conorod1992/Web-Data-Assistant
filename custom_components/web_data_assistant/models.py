@@ -36,6 +36,7 @@ class WebDataEntityConfig:
     state_class: str | None = None
     value_type: str = VALUE_TEXT
     long_text_policy: str | None = None
+    expected_match_count: int | None = None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "WebDataEntityConfig":
@@ -56,6 +57,7 @@ class WebDataEntityConfig:
             state_class=data.get(CONF_STATE_CLASS),
             value_type=data.get(CONF_VALUE_TYPE, VALUE_TEXT),
             long_text_policy=data.get(CONF_LONG_TEXT_POLICY),
+            expected_match_count=data.get("expected_match_count"),
         )
 
     def as_dict(self) -> dict[str, Any]:
@@ -82,6 +84,8 @@ class WebDataEntityConfig:
             data[CONF_STATE_CLASS] = self.state_class
         if self.long_text_policy:
             data[CONF_LONG_TEXT_POLICY] = self.long_text_policy
+        if self.expected_match_count is not None:
+            data["expected_match_count"] = self.expected_match_count
         return data
 
 
