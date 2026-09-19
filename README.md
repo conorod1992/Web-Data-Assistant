@@ -21,9 +21,9 @@ The guided panel supports three JSON output modes:
 
 - **Separate sensors** — each selected scalar value becomes its own Home Assistant sensor and state.
 - **One sensor + attributes** — choose one selected value as the entity state, with the other selected values exposed as normal Home Assistant attributes. The state can also be left as the stable value `Loaded` when the entity is primarily an attribute container.
-- **Import object as attributes** — the top-level keys of a JSON object become attributes on one entity. Nested objects and arrays remain structured dictionaries/lists rather than being flattened into artificial key names.
+- **Import object as attributes** — choose the root object or any nested JSON object. Its direct children become attributes on one entity, while nested objects and arrays remain structured dictionaries/lists rather than being flattened. One direct scalar child can optionally be promoted to the entity state.
 
-JSON locations are stored internally as RFC 6901 JSON Pointers, so unusual object keys do not require the user to build or escape a template expression. The tree is only a browsing layer over those stable pointers: nested objects and array indexes are expandable by default, while typing in Search switches to a flat filtered result list without losing selections. Attribute names are editable in the guided aggregate mode.
+JSON locations are stored internally as RFC 6901 JSON Pointers, so unusual object keys do not require the user to build or escape a template expression. The tree is only a browsing layer over those stable pointers: nested objects and array indexes are expandable by default, while typing in Search switches to a flat filtered result list without losing selections. Object branches also offer **Use as attribute group**, making a subtree such as `/current` directly usable as one structured Home Assistant sensor. Attribute names are editable in the guided aggregate mode.
 
 For numeric state sensors, the panel can also suggest native Home Assistant sensor metadata when the meaning is reasonably clear from the path/name/unit. Examples include Temperature + Measurement, Humidity + Measurement, and cumulative kWh Energy + Total increasing. Suggestions are visible and user-overridable; **None** disables either device class or statistics behavior. Existing stored metadata is preserved during Edit rather than silently recalculated.
 
@@ -105,6 +105,8 @@ A source-connection failure and an extraction failure are deliberately treated d
 
 Sensors expose concise source-health information such as whether the latest source refresh succeeded and when the last successful update occurred. Connection errors are intentionally sanitized so request URLs or credentials are not exposed through state attributes.
 
+The configured-source cards provide actionable troubleshooting rather than only a status colour/count. A source outage explains whether sensors are unavailable or retaining their last values, including the stale-value deadline when configured, and offers **Try now**. Extraction failures identify the affected sensor and keep its configured JSON path or selector under **Technical details**, with **Repair** or **Edit** as appropriate. Source-level error text shown there comes from the integration's sanitized error messages; request credentials and retrieved values remain excluded.
+
 ## Home Assistant UI
 
 Web Data Assistant has two setup surfaces:
@@ -131,6 +133,9 @@ The current v1 foundation supports:
 - a 20-second request timeout
 - a 2 MB response-size safety limit
 - bounded/chunk-aware response reading
+- conditional GET polling using server `ETag` and/or `Last-Modified` validators when available
+
+For GET sources, validators returned by a successful response are kept in coordinator runtime memory. Later polls send `If-None-Match` / `If-Modified-Since` when available. A valid `304 Not Modified` is treated as successful source contact: existing extracted data is reused without downloading/parsing a new body, source health stays successful, and `last_successful_update` advances. Validators are intentionally not persisted across Home Assistant restarts, so the first poll after restart fetches a complete response. POST sources are unchanged.
 
 ## Deliberate v1 limits
 
@@ -251,21 +256,21 @@ A separate runtime suite is pinned to **Home Assistant 2026.9.2** through `pytes
 - guided JSON/scrape fallback config flows and options reload
 - WebSocket schema, authorization and JSON-attribute validation
 
-The same Home Assistant job also exercises `WebDataClient` against a real local HTTP server, covering redirects, chunked responses, compressed data, non-2xx errors, malformed and non-standard JSON, charsets, declared and streaming response-size limits, request timeouts, and POST headers/body transmission.
+The same Home Assistant job also exercises `WebDataClient` against a real local HTTP server, covering redirects, chunked responses, compressed data, non-2xx errors, malformed and non-standard JSON, charsets, declared and streaming response-size limits, request timeouts, POST headers/body transmission, and conditional GET/304 behavior.
 
 A separate Playwright/Chromium suite renders the actual custom panel JavaScript and covers:
 
 - clean initial rendering and configured-source loading
 - JSON separate-sensor creation, names, units, scalar types and escaped pointers
 - one JSON sensor with a selected state plus attributes
-- root-object import with structured attributes
+- root and nested-object import with structured attributes and optional direct-child state
 - hierarchical JSON browsing with expandable object/array branches and flat search fallback
 - native Home Assistant device/state-class suggestions with explicit overrides
 - text-first scrape matching and ambiguous-match disambiguation
 - multiple scraped values from one page, including add/remove/re-add setup
 - confirmation that the primary scrape panel does not use an iframe
 - source/default long-text handling controls
-- source health, stale retained states and manual refresh
+- source health, actionable outage/extraction troubleshooting, stale retained states and manual recovery
 - delete confirmation/cancel/removal behavior
 - guided source Edit and Duplicate flows
 - preservation of the populated Edit form after an update failure

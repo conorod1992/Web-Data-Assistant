@@ -47,10 +47,20 @@ class WebDataClient:
         payload: str | None = None,
         verify_ssl: bool = True,
         parse_json: bool = False,
+        etag: str | None = None,
+        last_modified: str | None = None,
     ) -> FetchResponse:
         """Fetch one web source and optionally decode JSON."""
+        request_headers = dict(headers or {})
+        lower_header_names = {name.casefold() for name in request_headers}
+        if etag and "if-none-match" not in lower_header_names:
+            request_headers["If-None-Match"] = etag
+        if last_modified and "if-modified-since" not in lower_header_names:
+            request_headers["If-Modified-Since"] = last_modified
+        conditional_request = bool(etag or last_modified)
+
         request_kwargs: dict[str, Any] = {
-            "headers": headers or None,
+            "headers": request_headers or None,
             "ssl": None if verify_ssl else False,
         }
         if payload is not None and method.upper() != METHOD_GET:
@@ -63,6 +73,19 @@ class WebDataClient:
                     url,
                     **request_kwargs,
                 ) as response:
+                    if response.status == 304 and conditional_request:
+                        return FetchResponse(
+                            status=304,
+                            content_type=response.headers.get("Content-Type", ""),
+                            text="",
+                            json_data=None,
+                            etag=response.headers.get("ETag") or etag,
+                            last_modified=(
+                                response.headers.get("Last-Modified") or last_modified
+                            ),
+                            not_modified=True,
+                        )
+
                     if response.status < 200 or response.status >= 300:
                         raise WebDataConnectionError(
                             f"Source returned HTTP {response.status}"
@@ -94,6 +117,8 @@ class WebDataClient:
                         text = body.decode("utf-8", errors="replace")
                     content_type = response.headers.get("Content-Type", "")
                     status = response.status
+                    response_etag = response.headers.get("ETag")
+                    response_last_modified = response.headers.get("Last-Modified")
         except TimeoutError as err:
             raise WebDataConnectionError("The request timed out") from err
         except aiohttp.ClientError as err:
@@ -121,4 +146,6 @@ class WebDataClient:
             content_type=content_type,
             text=text,
             json_data=json_data,
+            etag=response_etag,
+            last_modified=response_last_modified,
         )

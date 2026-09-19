@@ -21,8 +21,10 @@ from .const import (
     CONF_LONG_TEXT_POLICY,
     CONF_MAX_STALE_MINUTES,
     CONF_METHOD,
+    CONF_INDEX,
     CONF_PATH,
     CONF_PAYLOAD,
+    CONF_SELECTOR,
     CONF_SCAN_INTERVAL,
     CONF_SOURCE_NAME,
     CONF_SOURCE_TYPE,
@@ -82,10 +84,12 @@ def _entry_snapshot(entry: ConfigEntry) -> dict[str, Any]:
 
     last_successful_update = None
     source_available = False
+    source_error = None
     extraction_error_count = 0
     extraction_issues: list[dict[str, Any]] = []
     if coordinator is not None:
         source_available = coordinator.last_update_success
+        source_error = coordinator.last_source_error
         if coordinator.last_successful_update is not None:
             last_successful_update = coordinator.last_successful_update.isoformat()
         if source_available and coordinator.data is not None:
@@ -108,11 +112,26 @@ def _entry_snapshot(entry: ConfigEntry) -> dict[str, Any]:
                         and entity.get("selector")
                     )
                 )
+                if entry.data.get(CONF_SOURCE_TYPE) == SOURCE_JSON:
+                    target_parts: list[str] = []
+                    if entity.get(CONF_PATH) is not None:
+                        target_parts.append(f"State path: {entity[CONF_PATH]}")
+                    target_parts.extend(
+                        f"Attribute {name}: {path}"
+                        for name, path in attributes.items()
+                    )
+                    target = " · ".join(target_parts) or "JSON extraction"
+                else:
+                    target = (
+                        f"Selector: {entity.get(CONF_SELECTOR, '(missing)')}"
+                        f" · match {int(entity.get(CONF_INDEX, 0))}"
+                    )
                 extraction_issues.append(
                     {
                         "key": str(key),
                         "name": str(entity.get("name") or key),
                         "error": str(error),
+                        "target": target,
                         "repairable": repairable,
                     }
                 )
@@ -137,6 +156,7 @@ def _entry_snapshot(entry: ConfigEntry) -> dict[str, Any]:
             entry.data.get(CONF_MAX_STALE_MINUTES),
         ),
         "source_available": source_available,
+        "source_error": source_error,
         "extraction_error_count": extraction_error_count,
         "extraction_issues": extraction_issues,
         "last_successful_update": last_successful_update,

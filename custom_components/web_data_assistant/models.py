@@ -93,6 +93,9 @@ class FetchResponse:
     content_type: str
     text: str
     json_data: Any | None = None
+    etag: str | None = None
+    last_modified: str | None = None
+    not_modified: bool = False
 
 
 @dataclass(slots=True)

@@ -394,3 +394,85 @@ async def test_client_parses_gzip_compressed_json(
     assert response.status == 200
     assert response.json_data == {"temperature": 14.6, "condition": "Cloudy"}
     assert response.text == '{"temperature":14.6,"condition":"Cloudy"}'
+
+
+
+async def test_client_supports_conditional_get_and_304(
+    hass: HomeAssistant,
+    aiohttp_server,
+    socket_enabled,
+) -> None:
+    """Send cached validators and treat an expected 304 as not modified."""
+    app = web.Application()
+    received: list[tuple[str | None, str | None]] = []
+    etag = '"weather-v1"'
+    last_modified = "Fri, 18 Sep 2026 18:00:00 GMT"
+
+    async def conditional(request: web.Request) -> web.Response:
+        received.append(
+            (
+                request.headers.get("If-None-Match"),
+                request.headers.get("If-Modified-Since"),
+            )
+        )
+        if request.headers.get("If-None-Match") == etag:
+            return web.Response(
+                status=304,
+                headers={"ETag": etag, "Last-Modified": last_modified},
+            )
+        return web.json_response(
+            {"temperature": 14.6},
+            headers={"ETag": etag, "Last-Modified": last_modified},
+        )
+
+    app.router.add_get("/weather", conditional)
+    server = await aiohttp_server(app)
+    client = WebDataClient(hass)
+    url = str(server.make_url("/weather"))
+
+    first = await client.async_fetch(url, parse_json=True)
+    second = await client.async_fetch(
+        url,
+        parse_json=True,
+        etag=first.etag,
+        last_modified=first.last_modified,
+    )
+
+    assert first.status == 200
+    assert first.json_data == {"temperature": 14.6}
+    assert first.etag == etag
+    assert first.last_modified == last_modified
+    assert first.not_modified is False
+
+    assert second.status == 304
+    assert second.not_modified is True
+    assert second.text == ""
+    assert second.json_data is None
+    assert second.etag == etag
+    assert second.last_modified == last_modified
+    assert received == [
+        (None, None),
+        (etag, last_modified),
+    ]
+
+
+async def test_manual_conditional_header_does_not_make_first_304_usable(
+    hass: HomeAssistant,
+    aiohttp_server,
+    socket_enabled,
+) -> None:
+    """Only automatic validators may turn a 304 into a reusable response."""
+    app = web.Application()
+
+    async def unchanged(_request: web.Request) -> web.Response:
+        return web.Response(status=304)
+
+    app.router.add_get("/unchanged", unchanged)
+    server = await aiohttp_server(app)
+
+    with pytest.raises(WebDataConnectionError, match="Source returned HTTP 304"):
+        await WebDataClient(hass).async_fetch(
+            str(server.make_url("/unchanged")),
+            headers={"If-None-Match": '"manual"'},
+            parse_json=True,
+        )

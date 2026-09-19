@@ -18,6 +18,10 @@ if (WebDataAssistantLifecyclePanel && !WebDataAssistantLifecyclePanel.prototype.
       .repair-issue { padding:10px 12px; border:1px solid color-mix(in srgb,var(--warning-color,#ff9800) 35%,var(--divider-color)); border-radius:8px; background:color-mix(in srgb,var(--warning-color,#ff9800) 6%,transparent); }
       .repair-issue-head { display:flex; justify-content:space-between; gap:12px; align-items:center; }
       .repair-issue details { margin-top:8px; padding-top:8px; font-size:12px; }
+      .source-troubleshooting { margin-top:12px; padding:12px; border:1px solid var(--divider-color); border-radius:8px; background:var(--secondary-background-color); }
+      .source-troubleshooting strong { display:block; margin-bottom:4px; }
+      .source-troubleshooting p { margin:4px 0 0; font-size:13px; }
+      .source-troubleshooting details { margin-top:8px; padding-top:8px; font-size:12px; }
     `;
   };
 
@@ -33,13 +37,32 @@ if (WebDataAssistantLifecyclePanel && !WebDataAssistantLifecyclePanel.prototype.
       const retaining = source.failure_mode === "keep_last" ? "Keep last value" : "Unavailable on failure";
       const extractionErrors = Number(source.extraction_error_count || 0);
       const extractionIssues = Array.isArray(source.extraction_issues) ? source.extraction_issues : [];
-      const repairIssues = extractionIssues.length ? `<div class="repair-issues">${extractionIssues.map((issue) => `<div class="repair-issue"><div class="repair-issue-head"><div><strong>${this._html(issue.name || issue.key || "Sensor")}</strong><div class="hint">This sensor's selected value could not be extracted.</div></div>${issue.repairable ? `<button class="secondary repair-entity" data-entry-id="${this._attr(source.entry_id)}" data-entity-key="${this._attr(issue.key)}" ${this._repairLoading || this._repairSaving ? "disabled" : ""}>Repair</button>` : `<button class="secondary edit-source" data-entry-id="${this._attr(source.entry_id)}">Use Edit</button>`}</div><details><summary>Technical details</summary><code>${this._html(issue.error || "Extraction failed")}</code></details></div>`).join("")}</div>` : "";
+      const repairIssues = extractionIssues.length ? `<div class="repair-issues">${extractionIssues.map((issue) => `<div class="repair-issue"><div class="repair-issue-head"><div><strong>${this._html(issue.name || issue.key || "Sensor")}</strong><div class="hint">The source loaded successfully, but this sensor's configured value could not be found.</div></div>${issue.repairable ? `<button class="secondary repair-entity" data-entry-id="${this._attr(source.entry_id)}" data-entity-key="${this._attr(issue.key)}" ${this._repairLoading || this._repairSaving ? "disabled" : ""}>Repair</button>` : `<button class="secondary edit-source" data-entry-id="${this._attr(source.entry_id)}">Use Edit</button>`}</div><details><summary>Technical details</summary>${issue.target ? `<div><code>${this._html(issue.target)}</code></div>` : ""}<div style="margin-top:5px;"><code>${this._html(issue.error || "Extraction failed")}</code></div></details></div>`).join("")}</div>` : "";
+      let sourceTroubleshooting = "";
+      if (source.state === "loaded" && !source.source_available && source.source_error) {
+        let guidance = "Sensors are unavailable until the source responds successfully again.";
+        if (source.failure_mode === "keep_last" && source.last_successful_update) {
+          const lastSuccessMs = new Date(source.last_successful_update).getTime();
+          const maxStaleMinutes = Number(source.max_stale_minutes || 0);
+          if (Number.isFinite(maxStaleMinutes) && maxStaleMinutes > 0 && Number.isFinite(lastSuccessMs)) {
+            const expiresMs = lastSuccessMs + maxStaleMinutes * 60_000;
+            guidance = Date.now() < expiresMs
+              ? `Last known values are being retained. They remain valid until ${this._formatDate(new Date(expiresMs).toISOString())} unless the source recovers first.`
+              : "The retained-value age limit has been reached, so sensors are unavailable until the source recovers.";
+          } else {
+            guidance = "Last known values are being retained until the source recovers.";
+          }
+        } else if (source.failure_mode === "keep_last") {
+          guidance = "There is no previous successful value available to retain yet.";
+        }
+        sourceTroubleshooting = `<div class="source-troubleshooting"><strong>The source could not be reached</strong><p>${this._html(guidance)}</p><details><summary>Technical details</summary><code>${this._html(source.source_error)}</code></details></div>`;
+      }
       const confirmingDelete = this._deleteConfirmEntryId === source.entry_id;
       const deleting = this._deletingSource === source.entry_id;
       const loadingEdit = this._loadingEditableSource === source.entry_id;
       const editing = this._editingEntryId === source.entry_id;
       const confirm = confirmingDelete ? `<div class="delete-confirm"><p><strong>Delete ${this._html(source.title)}?</strong></p><p class="hint">This removes the source and its Home Assistant sensor entities. This cannot be undone.</p><div class="actions"><button class="secondary cancel-delete" data-entry-id="${this._attr(source.entry_id)}" ${deleting ? "disabled" : ""}>Cancel</button><button class="secondary danger confirm-delete" data-entry-id="${this._attr(source.entry_id)}" ${deleting ? "disabled" : ""}>${deleting ? "Deleting…" : "Delete source"}</button></div></div>` : "";
-      return `<div class="source-card"><div class="source-card-head"><div><div class="source-title">${this._html(source.title)}</div><div class="source-url">${this._html(source.url || "")}</div>${editing ? `<div class="editing-note">Editing now</div>` : ""}</div><span class="health ${health.className}"><span class="health-dot"></span>${this._html(health.label)}</span></div><div class="source-meta"><span>${this._html(type)}</span><span>${Number(source.entity_count || 0)} sensor${Number(source.entity_count || 0) === 1 ? "" : "s"}</span><span>Every ${Number(source.scan_interval || 5)} min</span><span>${this._html(retaining)}</span><span>Last success: ${this._html(lastSuccess)}</span>${extractionErrors ? `<span>${extractionErrors} extraction issue${extractionErrors === 1 ? "" : "s"}</span>` : ""}</div>${repairIssues}<div class="actions"><button class="secondary refresh-source" data-entry-id="${this._attr(source.entry_id)}" ${this._refreshingSource === source.entry_id || source.state !== "loaded" || deleting || loadingEdit ? "disabled" : ""}>${this._refreshingSource === source.entry_id ? "Refreshing…" : "Refresh now"}</button><button class="secondary edit-source" data-entry-id="${this._attr(source.entry_id)}" ${deleting || loadingEdit ? "disabled" : ""}>${loadingEdit ? "Opening…" : editing ? "Editing" : "Edit"}</button><button class="secondary duplicate-source" data-entry-id="${this._attr(source.entry_id)}" ${deleting || loadingEdit ? "disabled" : ""}>Duplicate</button><button class="secondary danger request-delete" data-entry-id="${this._attr(source.entry_id)}" ${deleting || loadingEdit ? "disabled" : ""}>Delete</button></div>${confirm}</div>`;
+      return `<div class="source-card"><div class="source-card-head"><div><div class="source-title">${this._html(source.title)}</div><div class="source-url">${this._html(source.url || "")}</div>${editing ? `<div class="editing-note">Editing now</div>` : ""}</div><span class="health ${health.className}"><span class="health-dot"></span>${this._html(health.label)}</span></div><div class="source-meta"><span>${this._html(type)}</span><span>${Number(source.entity_count || 0)} sensor${Number(source.entity_count || 0) === 1 ? "" : "s"}</span><span>Every ${Number(source.scan_interval || 5)} min</span><span>${this._html(retaining)}</span><span>Last success: ${this._html(lastSuccess)}</span>${extractionErrors ? `<span>${extractionErrors} extraction issue${extractionErrors === 1 ? "" : "s"}</span>` : ""}</div>${sourceTroubleshooting}${repairIssues}<div class="actions"><button class="secondary refresh-source" data-entry-id="${this._attr(source.entry_id)}" ${this._refreshingSource === source.entry_id || source.state !== "loaded" || deleting || loadingEdit ? "disabled" : ""}>${this._refreshingSource === source.entry_id ? "Refreshing…" : (!source.source_available ? "Try now" : "Refresh now")}</button><button class="secondary edit-source" data-entry-id="${this._attr(source.entry_id)}" ${deleting || loadingEdit ? "disabled" : ""}>${loadingEdit ? "Opening…" : editing ? "Editing" : "Edit"}</button><button class="secondary duplicate-source" data-entry-id="${this._attr(source.entry_id)}" ${deleting || loadingEdit ? "disabled" : ""}>Duplicate</button><button class="secondary danger request-delete" data-entry-id="${this._attr(source.entry_id)}" ${deleting || loadingEdit ? "disabled" : ""}>Delete</button></div>${confirm}</div>`;
     }).join("");
 
     const sourceError = this._sourcesError ? `<div class="notice error" style="margin-bottom:12px;">${this._html(this._sourcesError)}</div>` : "";

@@ -198,4 +198,5 @@ async def test_refresh_source_outage_returns_unavailable_snapshot(
     assert message["success"] is True
     assert message["result"]["entry_id"] == entry.entry_id
     assert message["result"]["source_available"] is False
+    assert message["result"]["source_error"] == "Source returned HTTP 503"
     assert fetch.await_count == 2

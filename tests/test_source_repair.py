@@ -86,6 +86,7 @@ async def test_list_sources_reports_repairable_extraction_issue_without_secrets(
             "key": "humidity",
             "name": "Humidity",
             "error": source["extraction_issues"][0]["error"],
+            "target": "State path: /current/humidity",
             "repairable": True,
         }
     ]
