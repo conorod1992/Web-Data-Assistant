@@ -60,7 +60,9 @@ from .extraction import (
     discover_json_candidates,
     extract_html_entities,
     find_html_text_matches,
+    preview_html_selector,
     resolve_json_pointer,
+    validate_html_selector,
 )
 from .models import WebDataEntityConfig
 from .preview import build_html_preview
@@ -164,6 +166,7 @@ _ENTITY_SCHEMA = vol.Schema(
         vol.Optional(CONF_SELECTOR): vol.All(str, vol.Length(min=1, max=2000)),
         vol.Optional(CONF_INDEX, default=0): vol.All(vol.Coerce(int), vol.Range(min=0)),
         vol.Optional(CONF_ATTRIBUTE): vol.All(str, vol.Length(min=1, max=200)),
+        vol.Optional("expected_match_count"): vol.All(int, vol.Range(min=1, max=MAX_RESPONSE_BYTES)),
         vol.Optional(CONF_UNIT): vol.All(str, vol.Length(max=100)),
         vol.Optional(CONF_DEVICE_CLASS): vol.All(str, vol.Length(max=100)),
         vol.Optional(CONF_STATE_CLASS): vol.All(str, vol.Length(max=100)),
@@ -191,6 +194,8 @@ def _validate_entity_definitions(source_type: str, entities: list[dict[str, Any]
 
     for entity in entities:
         if source_type == SOURCE_JSON:
+            if "expected_match_count" in entity:
+                raise ValueError("JSON sensors cannot contain an HTML match-count guard")
             if CONF_PATH not in entity and not entity.get(CONF_ATTRIBUTES):
                 raise ValueError(
                     "A JSON sensor needs a state path, one or more attributes, or both"
@@ -202,6 +207,9 @@ def _validate_entity_definitions(source_type: str, entities: list[dict[str, Any]
         else:
             if not entity.get(CONF_SELECTOR):
                 raise ValueError("A selected page value is missing its selector")
+            count = entity.get("expected_match_count")
+            if count is not None and entity.get(CONF_INDEX, 0) >= count:
+                raise ValueError("The selected match index must be below the expected match count")
             if CONF_PATH in entity:
                 raise ValueError("Web page sensors cannot contain a JSON path")
             if entity.get(CONF_ATTRIBUTES):
@@ -358,11 +366,52 @@ async def websocket_search_html(
                     "text": match.text,
                     "context": match.context,
                     "tag": match.tag,
+                    "candidates": match.candidates,
+                    "match_count": match.candidates[0]["match_count"] if match.candidates else None,
                 }
                 for match in matches
             ]
         },
     )
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/test_html_selector",
+        vol.Required(CONF_SELECTOR): vol.All(str, _non_empty_text, vol.Length(max=2000)),
+        vol.Optional(CONF_INDEX, default=0): vol.All(int, vol.Range(min=0, max=MAX_RESPONSE_BYTES)),
+        vol.Optional(CONF_ATTRIBUTE): vol.All(str, _non_empty_text, vol.Length(max=200)),
+        **_COMMON_FIELDS,
+    }
+)
+@websocket_api.require_admin
+@websocket_api.async_response
+async def websocket_test_html_selector(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Test a proposed selector without changing configuration or entity state."""
+    try:
+        await hass.async_add_executor_job(validate_html_selector, msg[CONF_SELECTOR])
+    except ValueError as err:
+        connection.send_error(msg["id"], "invalid_selector", str(err))
+        return
+    try:
+        response = await WebDataClient(hass).async_fetch(
+            msg[CONF_URL], **_fetch_kwargs(msg), parse_json=False,
+        )
+        result = await hass.async_add_executor_job(
+            preview_html_selector, response.text, msg[CONF_SELECTOR],
+            msg[CONF_INDEX], msg.get(CONF_ATTRIBUTE),
+        )
+    except WebDataError as err:
+        connection.send_error(msg["id"], "fetch_failed", str(err))
+        return
+    except (KeyError, TypeError, ValueError) as err:
+        connection.send_error(msg["id"], "invalid_selection", str(err))
+        return
+    connection.send_result(msg["id"], result)
 
 
 @websocket_api.websocket_command(
@@ -446,9 +495,7 @@ async def websocket_create_source(
         CONF_VERIFY_SSL: msg.get(CONF_VERIFY_SSL, DEFAULT_VERIFY_SSL),
         CONF_SCAN_INTERVAL: msg.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL_MINUTES),
         CONF_FAILURE_MODE: msg.get(CONF_FAILURE_MODE, DEFAULT_FAILURE_MODE),
-        CONF_LONG_TEXT_POLICY: msg.get(
-            CONF_LONG_TEXT_POLICY, DEFAULT_LONG_TEXT_POLICY
-        ),
+        CONF_LONG_TEXT_POLICY: msg.get(CONF_LONG_TEXT_POLICY, DEFAULT_LONG_TEXT_POLICY),
         CONF_ENTITIES: entities,
     }
     if payload := msg.get(CONF_PAYLOAD):
@@ -465,9 +512,7 @@ async def websocket_create_source(
     entry_id = getattr(entry, "entry_id", None)
     if entry_id is None:
         connection.send_error(
-            msg["id"],
-            "create_failed",
-            "Home Assistant did not create the source entry",
+            msg["id"], "create_failed", "Home Assistant did not create the source entry",
         )
         return
 
@@ -483,5 +528,6 @@ def async_register_websocket_commands(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, websocket_preview_json)
     websocket_api.async_register_command(hass, websocket_preview_html)
     websocket_api.async_register_command(hass, websocket_search_html)
+    websocket_api.async_register_command(hass, websocket_test_html_selector)
     websocket_api.async_register_command(hass, websocket_create_source)
     domain_data[DATA_WEBSOCKET_REGISTERED] = True
