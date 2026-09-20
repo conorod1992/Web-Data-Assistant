@@ -6,6 +6,7 @@ from collections.abc import Iterator
 from typing import Any
 
 from bs4 import BeautifulSoup, Tag
+import soupsieve
 
 from .const import MAX_HTML_MATCHES, MAX_JSON_DISCOVERY_VALUES, MAX_PREVIEW_LENGTH
 from .models import (
@@ -14,6 +15,7 @@ from .models import (
     JsonCandidate,
     WebDataEntityConfig,
 )
+from .selector_candidates import SelectorGenerator
 
 _NON_VISIBLE_TEXT_TAGS = {"head", "script", "style", "template", "noscript"}
 
@@ -147,47 +149,6 @@ def _smallest_text_matches(soup: BeautifulSoup, search_text: str) -> list[Tag]:
     return matches
 
 
-def _safe_classes(tag: Tag) -> list[str]:
-    """Return class names that are reasonable to use in a generated selector."""
-    classes = tag.get("class", [])
-    return [
-        value
-        for value in classes
-        if isinstance(value, str)
-        and value
-        and len(value) <= 64
-        and not value[0].isdigit()
-        and all(char.isalnum() or char in "_-" for char in value)
-    ]
-
-
-def _selector_for_tag(soup: BeautifulSoup, tag: Tag) -> tuple[str, int]:
-    """Generate a compact selector plus the selected match index."""
-    element_id = tag.get("id")
-    if isinstance(element_id, str) and element_id:
-        selector = f"#{element_id}"
-        try:
-            found = soup.select(selector)
-        except Exception:  # BeautifulSoup delegates selector parsing to soupsieve.
-            found = []
-        if len(found) == 1:
-            return selector, 0
-
-    classes = _safe_classes(tag)
-    if classes:
-        selector = tag.name + "".join(f".{value}" for value in classes[:3])
-        found = soup.select(selector)
-        if tag in found:
-            return selector, found.index(tag)
-
-    selector = tag.name
-    found = soup.select(selector)
-    if tag in found:
-        return selector, found.index(tag)
-
-    raise ValueError("Unable to generate a selector for the selected element")
-
-
 def _context_for_tag(tag: Tag) -> str:
     """Build concise surrounding text to help disambiguate matches."""
     current: Tag | None = tag
@@ -203,40 +164,60 @@ def _context_for_tag(tag: Tag) -> str:
 
 
 def find_html_text_matches(html: str, search_text: str) -> list[HtmlMatch]:
-    """Find selectable HTML elements containing text entered by the user."""
+    """Find selected nodes and rank locators without using the measured text."""
     if not search_text.strip():
         return []
 
     soup = BeautifulSoup(html, "html.parser")
+    generator = SelectorGenerator(soup)
     matches: list[HtmlMatch] = []
     for tag in _smallest_text_matches(soup, search_text.strip()):
-        selector, index = _selector_for_tag(soup, tag)
+        candidates = generator.candidates(tag)
+        recommended = candidates[0]
         matches.append(
             HtmlMatch(
-                selector=selector,
-                index=index,
+                selector=recommended.selector,
+                index=recommended.index,
                 text=_preview(_normalise_text(tag.get_text(" ", strip=True))),
                 context=_context_for_tag(tag),
                 tag=tag.name,
+                candidates=[candidate.as_dict() for candidate in candidates],
             )
         )
     return matches
 
 
-def extract_html_value_from_soup(
+def validate_html_selector(selector: str) -> None:
+    """Check custom syntax in an executor before doing a network request."""
+    try:
+        soupsieve.compile(selector)
+    except soupsieve.SelectorSyntaxError as err:
+        raise ValueError("Invalid CSS selector. Check its syntax.") from err
+
+
+def _selected_html_tag(
     soup: BeautifulSoup,
     selector: str,
-    index: int = 0,
-    attribute: str | None = None,
-) -> str:
-    """Extract one value from an already parsed HTML document."""
-    matches = soup.select(selector)
+    index: int,
+    expected_match_count: int | None = None,
+) -> tuple[Tag, int]:
+    try:
+        matches = soup.select(selector)
+    except soupsieve.SelectorSyntaxError as err:
+        raise ValueError("Invalid CSS selector. Check its syntax.") from err
+    if expected_match_count is not None and len(matches) != expected_match_count:
+        raise ValueError(
+            f"Selector match count changed: expected {expected_match_count}, found {len(matches)}. "
+            "Repair the selection to avoid reading a different element."
+        )
     if index < 0 or index >= len(matches):
         raise KeyError(
             f"Selector {selector!r} returned {len(matches)} elements; index {index} is unavailable"
         )
+    return matches[index], len(matches)
 
-    selected = matches[index]
+
+def _html_tag_value(selected: Tag, attribute: str | None = None) -> str:
     if attribute:
         value = selected.get(attribute)
         if value is None:
@@ -244,8 +225,35 @@ def extract_html_value_from_soup(
         if isinstance(value, list):
             return " ".join(str(item) for item in value)
         return str(value)
-
     return _normalise_text(selected.get_text(" ", strip=True))
+
+
+def preview_html_selector(
+    html: str, selector: str, index: int = 0, attribute: str | None = None,
+) -> dict[str, Any]:
+    """Test a custom locator with the same parser/extraction as runtime polling."""
+    soup = BeautifulSoup(html, "html.parser")
+    selected, count = _selected_html_tag(soup, selector, index)
+    return {
+        "selector": selector,
+        "index": index,
+        "match_count": count,
+        "text": _preview(_html_tag_value(selected, attribute)),
+        "context": _context_for_tag(selected),
+        "tag": selected.name,
+    }
+
+
+def extract_html_value_from_soup(
+    soup: BeautifulSoup,
+    selector: str,
+    index: int = 0,
+    attribute: str | None = None,
+    expected_match_count: int | None = None,
+) -> str:
+    """Extract one value, optionally refusing changed selector cardinality."""
+    selected, _ = _selected_html_tag(soup, selector, index, expected_match_count)
+    return _html_tag_value(selected, attribute)
 
 
 def extract_html_value(
@@ -275,6 +283,7 @@ def extract_html_entities(
                 entity.selector,
                 entity.index,
                 entity.attribute,
+                entity.expected_match_count,
             )
         except (KeyError, TypeError, ValueError) as err:
             result.extraction_errors[entity.key] = str(err)

@@ -37,6 +37,7 @@ from .const import (
     DEFAULT_VERIFY_SSL,
     DOMAIN,
     FAILURE_KEEP_LAST,
+    MAX_RESPONSE_BYTES,
     METHOD_GET,
     SOURCE_JSON,
 )
@@ -423,6 +424,7 @@ async def _validate_replacement_entity(
         vol.Optional(CONF_PATH): str,
         vol.Optional("selector"): str,
         vol.Optional("index", default=0): vol.Coerce(int),
+        vol.Optional("expected_match_count"): vol.All(int, vol.Range(min=1, max=MAX_RESPONSE_BYTES)),
     }
 )
 @websocket_api.require_admin
@@ -454,6 +456,9 @@ async def websocket_repair_entity(
     replacement = dict(entities[entity_index])
     source_type = entry.data.get(CONF_SOURCE_TYPE)
     if source_type == SOURCE_JSON:
+        if "expected_match_count" in msg:
+            connection.send_error(msg["id"], "invalid_replacement", "Match-count guards apply only to web page sensors")
+            return
         if replacement.get(CONF_ATTRIBUTES):
             connection.send_error(
                 msg["id"],
@@ -477,6 +482,11 @@ async def websocket_repair_entity(
             return
         replacement["selector"] = selector
         replacement["index"] = int(msg.get("index", 0))
+        # A guard belongs to the selected locator, not its predecessor. Older
+        # clients may omit it; newly tested selections send their observed count.
+        replacement.pop("expected_match_count", None)
+        if "expected_match_count" in msg:
+            replacement["expected_match_count"] = msg["expected_match_count"]
 
     try:
         _validate_entity_definitions(source_type, [replacement])
